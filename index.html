@@ -222,6 +222,8 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 .pctl{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:10px 0 4px;font-size:14px}
 .pctl select{padding:3px 6px}
 .segs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px;font-size:14px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}.seg button{border:0;background:none;padding:6px 14px;cursor:pointer;font:inherit}.seg button.on{background:var(--ink);color:#fff}
+.anc{margin-top:10px}
 .foot{border-top:1px solid var(--rule);margin-top:30px;padding:18px 0;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -372,9 +374,10 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     <h1>Cách học, template và mẹo làm bài</h1>
     <p class="lead">Khung bài cho từng kỹ năng, cụm từ nên dùng và ý tưởng cho các chủ đề hay ra. Học khung và cụm từ, đừng học thuộc nguyên bài mẫu: giám khảo dễ nhận ra và trừ điểm.</p>
     <div class="anchors">
-      <a href="#t-how">Cách học từng kỹ năng</a><a href="#t-w1">Thư</a><a href="#t-w2">Luận</a><a href="#t-sp">Speaking</a><a href="#t-lr">Nghe & Đọc</a><a href="#t-topic">Ý tưởng theo chủ đề</a><a href="#t-ai">Dàn ý cho đề của bạn</a>
+      <a href="#anc">Bài mẫu chuẩn (hiệu chỉnh chấm)</a><a href="#t-how">Cách học từng kỹ năng</a><a href="#t-w1">Thư</a><a href="#t-w2">Luận</a><a href="#t-sp">Speaking</a><a href="#t-lr">Nghe & Đọc</a><a href="#t-topic">Ý tưởng theo chủ đề</a><a href="#t-ai">Dàn ý cho đề của bạn</a>
     </div>
   </div></div>
+  <div class="wrap" id="anc-body"></div>
   <div class="wrap" id="tips-body"></div>
 </div>
 
@@ -591,6 +594,7 @@ function show(v){
   if(v==='vocab') renderVocab();
   if(v==='bank') renderBank();
   if(v==='home') renderHome();
+  if(v==='tips') renderAnchors();
   if(v==='grammar') renderGrammar();
   if(v==='coach') renderCoach();
   if(v==='gpt') renderGptView();
@@ -1162,17 +1166,17 @@ async function openWrite(card,givenPrompt){
     const ans=ta.value.trim();if(wc(ans)<20){$('#w-res').innerHTML='<p class="mute">Bài quá ngắn để chấm.</p>';return}
     stopClock();$('#w-go').disabled=true;ta.readOnly=true;$('#w-res').innerHTML=spin('Đang chấm bài… (khoảng 20–40 giây)');
     const vstep=task.startsWith('v'),basic=task==='a'||task==='pt';
-    const rubric=task==='pt'?`You are a calibrated English writing assessor placing a learner on the CEFR scale. Rate this email on 4 criteria, each 0-10 using VSTEP-style calibration (B1≈4-5.5, B2≈6-8, C1≈8.5+): Hoàn thành yêu cầu (Task fulfillment), Tổ chức bài (Organization), Từ vựng (Vocabulary), Ngữ pháp (Grammar). overall = mean rounded to 0.5. level = the single most likely CEFR level: exactly one of A1, A2, B1, B2, C1.`:basic?`You are a kind but honest assessor for A1–A2 English learners. Rate this short text on 4 criteria, each 0-10 relative to a strong A2 performance (10 = excellent A2): Hoàn thành yêu cầu (Task), Từ vựng (Vocabulary), Ngữ pháp (Grammar), Chính tả và dấu câu (Spelling & punctuation). overall = mean rounded to 0.5. level = estimated CEFR ("A1", "A1–A2", "A2", "A2–B1" or "B1"). Keep comments simple and encouraging.`:vstep?`You are a strict, calibrated VSTEP.3-5 writing examiner (Vietnam MOET format). Score ${task==='v1'?'Task 1 (letter, min 120 words)':'Task 2 (essay, min 250 words)'} on the 4 VSTEP criteria, each 0-10 in 0.5 steps: 1) Task fulfillment (all required points, register, adequate length — penalise under-length), 2) Organization (paragraphing, coherence, cohesion), 3) Vocabulary (range, accuracy, collocation, spelling), 4) Grammar (range, accuracy, punctuation). overall = mean rounded to 0.5. level: "Bậc 3 (B1)" 4.0-5.5, "Bậc 4 (B2)" 6.0-8.0, "Bậc 5 (C1)" 8.5+, else "Dưới bậc 3". A typical B1 text scores 4-5.5, B2 6-8; memorised templates are penalised.`
+    const rubric=task==='pt'?`You are a calibrated English writing assessor placing a learner on the CEFR scale. Rate this email on 4 criteria, each 0-10 using VSTEP-style calibration (B1≈4-5.5, B2≈6-8, C1≈8.5+): Hoàn thành yêu cầu (Task fulfillment), Tổ chức bài (Organization), Từ vựng (Vocabulary), Ngữ pháp (Grammar). overall = mean rounded to 0.5. level = the single most likely CEFR level: exactly one of A1, A2, B1, B2, C1.`:basic?`You are a kind but honest assessor for A1–A2 English learners. Rate this short text on 4 criteria, each 0-10 relative to a strong A2 performance (10 = excellent A2): Hoàn thành yêu cầu (Task), Từ vựng (Vocabulary), Ngữ pháp (Grammar), Chính tả và dấu câu (Spelling & punctuation). overall = mean rounded to 0.5. level = estimated CEFR ("A1", "A1–A2", "A2", "A2–B1" or "B1"). Keep comments simple and encouraging.`:vstep?W_VSTEP(task)
       :`You are a calibrated ETS TOEIC Writing rater. ${task==='t8'?'Q8 opinion essay: 0-5 ETS scale.':'Q6-7 email: 0-4 ETS scale.'} Criteria on the same scale. overall "x/5" or "x/4". level = estimated CEFR.`;
     try{
-      const d=await ask(`${rubric}
+      const d=await ask(`${rubric}${vstep?calibBlock('write',task):''}
 Prompt:\n"""${prompt}"""\nCandidate response (${wc(ans)} words):\n"""${ans}"""
 Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên tiếng Việt (English)","score":number,"comment_vi":"1-2 câu nhận xét cụ thể"}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":"exact excerpt","correction":string,"explain_vi":string}] (up to 8 most serious),"improve_vi":["3 việc cụ thể cho bài sau"]}`,'complex');
-      let extra='';
+      let extra=vstep?calibApply('write',d):'';
       if(basic){d.overall=round05(+d.overall);addHist(task==='pt'?'Test đầu vào':'Viết A1–A2',d.overall,task==='pt'?'Test đầu vào: Viết':'Viết A1–A2: '+(prompt.split('\n')[0]||'').slice(0,60));if(card.onResult)card.onResult(d);}
       else if(vstep){const s=round05(+d.overall);d.overall=s;state.lastW[task]=s;
-        if(state.lastW.v1!=null&&state.lastW.v2!=null){const tot=round05((state.lastW.v1+2*state.lastW.v2)/3);state.last['VSTEP Viết']=tot;extra=`<p>Điểm Viết ước tính (Task 1 × 1/3 + Task 2 × 2/3, bài gần nhất mỗi task): <b>${tot}</b>/10</p>`;}
-        else{state.last['VSTEP Viết']=s;extra=`<p class="mute">Điểm Viết = Task 1 × 1/3 + Task 2 × 2/3. Làm thêm ${task==='v1'?'Task 2':'Task 1'} để có điểm Viết tổng.</p>`;}
+        if(state.lastW.v1!=null&&state.lastW.v2!=null){const tot=round05((state.lastW.v1+2*state.lastW.v2)/3);state.last['VSTEP Viết']=tot;extra+=`<p>Điểm Viết ước tính (Task 1 × 1/3 + Task 2 × 2/3, bài gần nhất mỗi task): <b>${tot}</b>/10</p>`;}
+        else{state.last['VSTEP Viết']=s;extra+=`<p class="mute">Điểm Viết = Task 1 × 1/3 + Task 2 × 2/3. Làm thêm ${task==='v1'?'Task 2':'Task 1'} để có điểm Viết tổng.</p>`;}
         addHist(M.name,s,`${M.name}: ${card.title||''}`);}
       else addHist(M.name,String(d.overall),M.name);
       $('#w-res').innerHTML=`<div class="result" style="margin-top:12px">${gradeHTML(d,vstep||basic?'/10':'',extra)}<div class="row"><button class="btn ghost sm" id="w-model">Xem bài mẫu</button><button class="btn sm" onclick="closeRoom()">Xong</button></div><div id="w-mout"></div></div>`;
@@ -1186,6 +1190,106 @@ Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên ti�
   $('#w-go').onclick=go;
   const sub=$('#r-submit');sub.classList.remove('hidden');sub.onclick=()=>{if(innerWidth<=820)tabs[1].click();go();};
   startClock(M.min*60,()=>{$('#w-res').innerHTML='<div class="note">Hết giờ! Bấm "Nộp và chấm" khi xong.</div>';});
+}
+
+const W_VSTEP=task=>`You are a strict, calibrated VSTEP.3-5 writing examiner (Vietnam MOET format). Score ${task==='v1'?'Task 1 (letter, min 120 words)':'Task 2 (essay, min 250 words)'} on the 4 VSTEP criteria, each 0-10 in 0.5 steps: 1) Task fulfillment (all required points, register, adequate length — penalise under-length), 2) Organization (paragraphing, coherence, cohesion), 3) Vocabulary (range, accuracy, collocation, spelling), 4) Grammar (range, accuracy, punctuation). overall = mean rounded to 0.5. level: "Bậc 3 (B1)" 4.0-5.5, "Bậc 4 (B2)" 6.0-8.0, "Bậc 5 (C1)" 8.5+, else "Dưới bậc 3". A typical B1 text scores 4-5.5, B2 6-8; memorised templates are penalised.`;
+const S_VSTEP=part=>`You are a calibrated VSTEP.3-5 speaking examiner. Rate this Part ${String(part).slice(1)} response on the 5 VSTEP speaking criteria, each 0-10 (0.5 steps): Grammar (Ngữ pháp), Vocabulary (Từ vựng), Pronunciation (Phát âm), Fluency (Độ trôi chảy), Discourse management (Tổ chức ý). overall = mean rounded to 0.5; level per VSTEP bands.`;
+
+/* =================== BÀI MẪU CHUẨN: hiệu chỉnh AI chấm theo điểm giám khảo =================== */
+const ANC_CRIT={write:[['tf','Hoàn thành yêu cầu'],['org','Tổ chức bài'],['voc','Từ vựng'],['gram','Ngữ pháp']],speak:[['gram','Ngữ pháp'],['voc','Từ vựng'],['pron','Phát âm'],['flu','Trôi chảy'],['disc','Tổ chức ý']]};
+const ANC_TASK={write:[['v1','Task 1 – Thư'],['v2','Task 2 – Luận']],speak:[['v1','Part 1 – Giao tiếp'],['v2','Part 2 – Giải pháp'],['v3','Part 3 – Phát triển chủ đề']]};
+const ANC_EN={tf:'Task fulfillment',org:'Organization',voc:'Vocabulary',gram:'Grammar',pron:'Pronunciation',flu:'Fluency',disc:'Discourse'};
+function critKey(name){const n=String(name||'').toLowerCase();return /task|hoàn thành/.test(n)?'tf':/organi|tổ chức bài/.test(n)?'org':/vocab|từ vựng/.test(n)?'voc':/grammar|ngữ pháp/.test(n)?'gram':/pronun|phát âm/.test(n)?'pron':/fluen|trôi chảy/.test(n)?'flu':/discourse|tổ chức ý/.test(n)?'disc':null;}
+function anchorsAll(){state.anchors=Array.isArray(state.anchors)?state.anchors:[];return state.anchors;}
+function pickAnchors(skill,task,excludeId){
+  let a=anchorsAll().filter(x=>x.skill===skill&&x.id!==excludeId&&x.text&&x.total!=null);
+  const same=a.filter(x=>x.task===task);if(same.length>=2)a=same;
+  a=a.slice().sort((x,y)=>x.total-y.total);if(a.length<=3)return a;return [a[0],a[Math.floor(a.length/2)],a[a.length-1]];
+}
+function critStr(x){const c=x.crit||{};const k=Object.keys(c).filter(k=>c[k]!=null&&c[k]!=='');return k.length?' ('+k.map(k=>ANC_EN[k]+' '+c[k]).join(', ')+')':'';}
+function calibBlock(skill,task,excludeId){
+  const a=pickAnchors(skill,task,excludeId);if(!a.length)return '';
+  return `\nCALIBRATION: these responses to the same kind of task were scored by HUMAN examiners on this same 0-10 scale. Score the new response consistently with them: compare its task completion, length, organisation, range and errors with each anchor, and place it relative to them. Never mention the anchors in your feedback.\n`+
+    a.map((x,i)=>`--- Anchor ${i+1}: HUMAN score ${x.total}/10${critStr(x)}${x.comment?`. Examiner note: ${x.comment.slice(0,300)}`:''}\nTask: ${(x.prompt||'(not given)').slice(0,500)}\nResponse: """${x.text.slice(0,2200)}"""`).join('\n')+'\n--- End of anchors.\n';
+}
+function calibStats(skill){
+  const a=anchorsAll().filter(x=>x.skill===skill&&x.ai&&x.ai.total!=null&&x.total!=null);const n=a.length;if(!n)return{n:0,off:{}};
+  const d=a.map(x=>x.ai.total-x.total),off={};
+  ANC_CRIT[skill].forEach(([k])=>{const v=a.filter(x=>x.crit&&x.crit[k]!=null&&x.crit[k]!==''&&x.ai.crit&&x.ai.crit[k]!=null).map(x=>x.ai.crit[k]-(+x.crit[k]));if(v.length>=2)off[k]=v.reduce((p,q)=>p+q,0)/v.length;});
+  return{n,bias:d.reduce((p,q)=>p+q,0)/n,mae:d.reduce((p,q)=>p+Math.abs(q),0)/n,off};
+}
+function calibApply(skill,d){
+  const st=calibStats(skill);if(st.n<3||state.calibOn===false||!d)return '';
+  const cl=v=>Math.max(0,Math.min(10,v)),raw=round05(+d.overall);
+  const cs=(d.criteria||[]).filter(c=>isFinite(+c.score));
+  cs.forEach(c=>{const k=critKey(c.name);const o=k&&st.off[k]!=null?st.off[k]:st.bias;c.score=round05(cl(+c.score-o));});
+  d.overall=cs.length?round05(cs.reduce((p,c)=>p+c.score,0)/cs.length):round05(cl(raw-st.bias));
+  if(Math.abs(d.overall-raw)<0.01)return `<p class="mute">Đã đối chiếu với ${st.n} bài mẫu chuẩn: điểm AI khớp giám khảo, không cần chỉnh.</p>`;
+  return `<p class="mute">Đã hiệu chỉnh theo ${st.n} bài mẫu chuẩn (AI thường chấm ${st.bias>=0?'cao':'thấp'} hơn giám khảo khoảng ${Math.abs(st.bias).toFixed(1)} điểm): điểm gốc của AI ${raw} → ${d.overall}.</p>`;
+}
+async function testAnchor(a){
+  const rub=a.skill==='write'?W_VSTEP(a.task):S_VSTEP(a.task);
+  const d=await ask(`${rub}${calibBlock(a.skill,a.task,a.id)}
+${a.skill==='speak'?'You only have a speech-to-text transcript: judge Pronunciation/Fluency from indirect evidence.\n':''}Task:\n"""${a.prompt||'(not given)'}"""\nCandidate response (${wc(a.text)} words):\n"""${a.text}"""
+Return ONLY JSON: {"criteria":[{"name":"Tiếng Việt (English)","score":number}],"overall":number}`,'complex');
+  const crit={};(d.criteria||[]).forEach(c=>{const k=critKey(c.name);if(k&&isFinite(+c.score))crit[k]=+c.score;});
+  a.ai={total:round05(+d.overall),crit,t:Date.now()};save();return a.ai;
+}
+let ancSkill='write';
+function renderAnchors(){
+  const box=$('#anc-body');if(!box)return;const all=anchorsAll(),list=all.filter(x=>x.skill===ancSkill),st=calibStats(ancSkill);
+  const auto=!STANDALONE||apiOn();
+  box.innerHTML=`<div class="sec" id="anc"><h2>Bài mẫu chuẩn: giúp AI chấm sát giám khảo</h2>
+    <p>Dán bài <b>đã được giám khảo hoặc thầy cô chấm điểm thật</b> (Viết hoặc Nói, VSTEP thang 10). Khi chấm bài của bạn, AI sẽ so với 2–3 bài mẫu cùng dạng đề để cho điểm sát hơn. Bấm <b>Cho AI chấm thử</b> trên từng bài để đo AI lệch bao nhiêu; từ 3 bài trở lên web tự bù độ lệch.</p>
+    <div class="row" style="margin-bottom:10px"><div class="seg" id="anc-sk"><button data-s="write" class="${ancSkill==='write'?'on':''}">Viết (${all.filter(x=>x.skill==='write').length})</button><button data-s="speak" class="${ancSkill==='speak'?'on':''}">Nói (${all.filter(x=>x.skill==='speak').length})</button></div></div>
+    <div class="panel">${st.n?`<b>Độ chính xác hiện tại (${st.n} bài đã chấm thử):</b> AI lệch trung bình <b>${st.mae.toFixed(2)}</b> điểm so với giám khảo, xu hướng chấm <b>${Math.abs(st.bias)<0.15?'khớp':st.bias>0?'cao hơn '+st.bias.toFixed(1):'thấp hơn '+(-st.bias).toFixed(1)}</b>.
+      ${Object.keys(st.off).length?'<br><span class="mute">Theo tiêu chí: '+Object.entries(st.off).map(([k,v])=>`${ANC_CRIT[ancSkill].find(x=>x[0]===k)[1]} ${v>=0?'+':''}${v.toFixed(1)}`).join(' · ')+'</span>':''}
+      <br><label style="display:inline-block;margin-top:6px"><input type="checkbox" id="anc-on" ${state.calibOn!==false?'checked':''} ${st.n<3?'disabled':''}> Tự bù độ lệch khi chấm ${st.n<3?'(cần ít nhất 3 bài đã chấm thử)':''}</label>`
+      :`<span class="mute">Chưa đo độ chính xác. Thêm bài mẫu rồi bấm "Cho AI chấm thử" trên từng bài.</span>`}
+      <div class="row" style="margin-top:10px"><button class="btn" id="anc-add">＋ Thêm bài mẫu ${ancSkill==='write'?'Viết':'Nói'}</button>${list.some(x=>!x.ai)?`<button class="btn ghost" id="anc-testall">Cho AI chấm thử ${list.filter(x=>!x.ai).length} bài chưa đo</button>`:''}${grp?'<button class="btn ghost" id="anc-share">Chia sẻ bài mẫu cho nhóm</button><button class="btn ghost" id="anc-get">Lấy bài mẫu của nhóm</button>':''}</div>
+      ${!auto?'<p class="mute" style="margin:8px 0 0">Đang dùng chế độ copy–dán: mỗi lần chấm thử là một lần dán sang ChatGPT/Gemini.</p>':''}<div id="anc-msg"></div></div>
+    <div id="anc-form"></div>
+    <div class="anc-list">${list.length?list.map(x=>`<div class="panel anc" data-id="${x.id}"><div class="row" style="justify-content:space-between"><b>${esc((ANC_TASK[x.skill].find(t=>t[0]===x.task)||['',''])[1])} · Giám khảo: ${x.total}/10</b><span class="mute">${esc(x.src||'')}</span></div>
+        <p class="mute" style="margin:4px 0">${ANC_CRIT[x.skill].filter(([k])=>x.crit&&x.crit[k]!=null).map(([k,t])=>t+' '+x.crit[k]).join(' · ')||'Chưa có điểm từng tiêu chí'}</p>
+        <div class="ptext" style="max-height:110px;overflow:auto;font-size:14px">${esc(x.text.slice(0,900))}${x.text.length>900?'…':''}</div>
+        <div class="row" style="margin-top:8px">${x.ai?`<span>AI chấm: <b>${x.ai.total}</b> (${x.ai.total-x.total>=0?'+':''}${(x.ai.total-x.total).toFixed(1)})</span>`:''}<button class="btn sm ghost" data-t="${x.id}">${x.ai?'Chấm thử lại':'Cho AI chấm thử'}</button><button class="btn sm ghost" data-e="${x.id}">Sửa</button><button class="btn sm ghost" data-d="${x.id}">Xoá</button></div></div>`).join('')
+      :'<p class="mute">Chưa có bài mẫu. Nguồn gợi ý: bài thầy cô chấm cho bạn, bài thi thật bạn biết điểm, bài mẫu có chấm điểm trên luyenthivstep.vn, Prep, ZIM, hoặc bài kèm nhận xét giám khảo của Cambridge (B1 Preliminary, B2 First, C1 Advanced) quy đổi sang thang VSTEP.</p>'}</div></div>`;
+  box.querySelectorAll('#anc-sk button').forEach(b=>b.onclick=()=>{ancSkill=b.dataset.s;renderAnchors();});
+  const on=$('#anc-on');if(on)on.onchange=e=>{state.calibOn=e.target.checked;save();};
+  $('#anc-add').onclick=()=>ancForm();
+  box.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>ancForm(all.find(x=>x.id===b.dataset.e)));
+  box.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>confirmBox('Xoá bài mẫu này?','Xoá',()=>{state.anchors=all.filter(x=>x.id!==b.dataset.d);save();renderAnchors();}));
+  const msg=t=>$('#anc-msg').innerHTML=t;
+  box.querySelectorAll('[data-t]').forEach(b=>b.onclick=async()=>{const a=all.find(x=>x.id===b.dataset.t);b.disabled=true;b.textContent='Đang chấm…';
+    try{await testAnchor(a);renderAnchors();}catch(e){b.disabled=false;b.textContent='Lỗi, thử lại';msg(`<p class="mute">${errMsg(e)}</p>`);}});
+  const ta=$('#anc-testall');if(ta)ta.onclick=async()=>{const todo=list.filter(x=>!x.ai);ta.disabled=true;let k=0;
+    for(const a of todo){msg(spin(`Đang chấm thử ${++k}/${todo.length}…`));try{await testAnchor(a);}catch(e){msg(`<p class="mute">${errMsg(e)}</p>`);break;}}renderAnchors();};
+  const sh=$('#anc-share');if(sh)sh.onclick=async()=>{sh.disabled=true;let n=0;for(const a of list){try{const m={id:a.id,skill:a.skill,task:a.task,total:a.total,by:acctName()};
+      const{error}=await supa.from('shared').upsert({group_id:grp.id,id:'anchor_'+a.id,kind:'anchor',meta:m,data:Object.assign({},a,{ai:undefined})});if(!error)n++;}catch(e){}}msg(`<p class="mute">Đã chia sẻ ${n} bài mẫu cho nhóm.</p>`);sh.disabled=false;};
+  const gt=$('#anc-get');if(gt)gt.onclick=async()=>{gt.disabled=true;try{const{data,error}=await supa.from('shared').select('id,data').eq('group_id',grp.id).eq('kind','anchor');if(error)throw error;
+      let n=0;(data||[]).forEach(r=>{const a=r.data;if(a&&a.id&&!all.some(x=>x.id===a.id)){delete a.ai;all.push(a);n++;}});save();renderAnchors();$('#anc-msg').innerHTML=`<p class="mute">Đã lấy ${n} bài mẫu mới từ nhóm.</p>`;}
+    catch(e){msg(`<p class="mute">${errMsg(e)}</p>`);gt.disabled=false;}};
+}
+function ancForm(a){
+  const sk=a?a.skill:ancSkill,f=$('#anc-form');a=a||{};
+  f.innerHTML=`<div class="panel" style="margin:12px 0"><h3 style="margin-top:0">${a.id?'Sửa':'Thêm'} bài mẫu ${sk==='write'?'Viết':'Nói'}</h3>
+    <div class="row"><label class="mute">Dạng đề <select id="af-task">${ANC_TASK[sk].map(([k,t])=>`<option value="${k}" ${a.task===k?'selected':''}>${t}</option>`).join('')}</select></label>
+      <label class="mute">Điểm giám khảo (0–10) <input id="af-total" type="number" min="0" max="10" step="0.5" value="${a.total!=null?a.total:''}" style="width:80px"></label></div>
+    <p class="mute" style="margin:8px 0 4px">Điểm từng tiêu chí (không bắt buộc, có thì AI hiệu chỉnh chính xác hơn):</p>
+    <div class="row">${ANC_CRIT[sk].map(([k,t])=>`<label class="mute">${t} <input data-c="${k}" type="number" min="0" max="10" step="0.5" value="${a.crit&&a.crit[k]!=null?a.crit[k]:''}" style="width:64px"></label>`).join('')}</div>
+    <textarea id="af-prompt" rows="3" style="width:100%;margin-top:8px" placeholder="Đề bài (dán nguyên đề)">${esc(a.prompt||'')}</textarea>
+    <textarea id="af-text" rows="8" style="width:100%;margin-top:8px" placeholder="${sk==='write'?'Bài viết của thí sinh':'Lời nói của thí sinh (bản chép lại)'}">${esc(a.text||'')}</textarea>
+    <textarea id="af-cmt" rows="2" style="width:100%;margin-top:8px" placeholder="Nhận xét của giám khảo (không bắt buộc)">${esc(a.comment||'')}</textarea>
+    <input id="af-src" style="width:100%;margin-top:8px" placeholder="Nguồn (ví dụ: cô Lan chấm, thi thật 10/2026, luyenthivstep.vn)" value="${esc(a.src||'')}">
+    <div class="row" style="margin-top:10px"><button class="btn" id="af-save">Lưu bài mẫu</button><button class="btn ghost" id="af-x">Huỷ</button><span class="mute" id="af-msg"></span></div></div>`;
+  f.scrollIntoView({behavior:'smooth'});
+  $('#af-x').onclick=()=>f.innerHTML='';
+  $('#af-save').onclick=()=>{const total=parseFloat($('#af-total').value),text=$('#af-text').value.trim();
+    if(!(total>=0&&total<=10))return $('#af-msg').textContent='Nhập điểm giám khảo từ 0 đến 10.';
+    if(wc(text)<15)return $('#af-msg').textContent='Dán bài làm của thí sinh (ít nhất 15 từ).';
+    const crit={};f.querySelectorAll('[data-c]').forEach(i=>{const v=parseFloat(i.value);if(v>=0&&v<=10)crit[i.dataset.c]=round05(v);});
+    const x={id:a.id||'a'+Date.now().toString(36),skill:sk,task:$('#af-task').value,total:round05(total),crit,prompt:$('#af-prompt').value.trim(),text,comment:$('#af-cmt').value.trim(),src:$('#af-src').value.trim(),t:a.t||Date.now()};
+    const all=anchorsAll(),i=all.findIndex(y=>y.id===x.id);if(i>=0)all[i]=x;else all.push(x);save();f.innerHTML='';renderAnchors();};
 }
 
 /* =================== SPEAKING =================== */
@@ -1254,17 +1358,18 @@ async function openSpeak(card,givenPrompt){
     const ans=ta.value.trim();if(wc(ans)<15){$('#s-res').innerHTML='<p class="mute">Bài nói quá ngắn để chấm.</p>';return}
     if(listening)stopMic();stopClock();$('#s-go').disabled=true;$('#s-res').innerHTML=spin('Đang chấm…');
     const vstep=card.part.startsWith('v'),basic=card.part==='a'||card.part==='pt';
-    const rubric=card.part==='pt'?`You are a calibrated English speaking assessor placing a learner on the CEFR scale. Rate this answer on the 5 VSTEP speaking criteria, each 0-10 with VSTEP-style calibration (B1≈4-5.5, B2≈6-8, C1≈8.5+): Ngữ pháp (Grammar), Từ vựng (Vocabulary), Phát âm (Pronunciation), Độ trôi chảy (Fluency), Tổ chức ý (Discourse). overall = mean rounded to 0.5. level = the single most likely CEFR level: exactly one of A1, A2, B1, B2, C1.`:basic?`You are a kind but honest assessor for A1–A2 English learners. Rate this spoken answer on 4 criteria, each 0-10 relative to a strong A2 performance: Trả lời đúng câu hỏi (Task), Từ vựng (Vocabulary), Ngữ pháp (Grammar), Độ trôi chảy (Fluency). overall = mean rounded to 0.5. level = estimated CEFR (A1, A1–A2, A2, A2–B1, B1). Keep comments simple.`:vstep?`You are a calibrated VSTEP.3-5 speaking examiner. Rate this Part ${card.part.slice(1)} response on the 5 VSTEP speaking criteria, each 0-10 (0.5 steps): Grammar (Ngữ pháp), Vocabulary (Từ vựng), Pronunciation (Phát âm), Fluency (Độ trôi chảy), Discourse management (Tổ chức ý). overall = mean rounded to 0.5; level per VSTEP bands.`
+    const rubric=card.part==='pt'?`You are a calibrated English speaking assessor placing a learner on the CEFR scale. Rate this answer on the 5 VSTEP speaking criteria, each 0-10 with VSTEP-style calibration (B1≈4-5.5, B2≈6-8, C1≈8.5+): Ngữ pháp (Grammar), Từ vựng (Vocabulary), Phát âm (Pronunciation), Độ trôi chảy (Fluency), Tổ chức ý (Discourse). overall = mean rounded to 0.5. level = the single most likely CEFR level: exactly one of A1, A2, B1, B2, C1.`:basic?`You are a kind but honest assessor for A1–A2 English learners. Rate this spoken answer on 4 criteria, each 0-10 relative to a strong A2 performance: Trả lời đúng câu hỏi (Task), Từ vựng (Vocabulary), Ngữ pháp (Grammar), Độ trôi chảy (Fluency). overall = mean rounded to 0.5. level = estimated CEFR (A1, A1–A2, A2, A2–B1, B1). Keep comments simple.`:vstep?S_VSTEP(card.part)
       :`You are a calibrated ETS TOEIC Speaking rater. Rate this Q11 opinion response 0-5 (ETS). Criteria on 0-5; overall "x/5"; level = CEFR.`;
     try{
-      const d=await ask(`${rubric}
+      const d=await ask(`${rubric}${vstep?calibBlock('speak',card.part):''}
 You only have a speech-to-text transcript: judge Pronunciation/Fluency only from indirect evidence (recognition errors, fillers, repetition, length vs about ${Math.round(card.sec/60)} minutes of speech) and say so briefly. Penalise answers clearly too short.
 Task:\n"""${prompt}"""\nTranscript (${wc(ans)} words):\n"""${ans}"""
 Return ONLY JSON: {"criteria":[{"name":"Tiếng Việt (English)","score":number,"comment_vi":string}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":string,"correction":string,"explain_vi":string}] (up to 6),"improve_vi":["3 việc cụ thể kèm 2–3 cụm từ tiếng Anh nên dùng cho đề này"]}`,'complex');
+      const calNote=vstep?calibApply('speak',d):'';
       if(basic){d.overall=round05(+d.overall);addHist(card.part==='pt'?'Test đầu vào':'Nói A1–A2',d.overall,card.part==='pt'?'Test đầu vào: Nói':'Nói A1–A2: '+card.title);if(card.onResult)card.onResult(d);}
       else if(vstep){d.overall=round05(+d.overall);state.last['VSTEP Nói']=d.overall;addHist('VSTEP Nói '+card.lab,d.overall,`Speaking ${card.lab}: ${card.title}`);}
       else addHist('TOEIC Nói Q11',String(d.overall),'TOEIC Speaking Q11');
-      $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${gradeHTML(d,vstep||basic?'/10':'','')}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
+      $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${gradeHTML(d,vstep||basic?'/10':'',calNote)}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
       $('#s-res').scrollIntoView({behavior:'smooth'});
     }catch(e){$('#s-res').innerHTML=`<p class="mute">${errMsg(e)}</p>`;$('#s-go').disabled=false;}
   };
