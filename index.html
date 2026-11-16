@@ -224,6 +224,9 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 .segs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px;font-size:14px}
 .seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}.seg button{border:0;background:none;padding:6px 14px;cursor:pointer;font:inherit}.seg button.on{background:var(--ink);color:#fff}
 .anc{margin-top:10px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.frow{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:14.5px}.frow>span:first-child,.frow>a{flex:1}
+.fbar{width:90px;height:8px;background:var(--ink-2);border-radius:4px;overflow:hidden;display:inline-block}.fbar i{display:block;height:100%}
 .foot{border-top:1px solid var(--rule);margin-top:30px;padding:18px 0;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -432,7 +435,8 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
           <select id="pg-lvl"><option>A1</option><option>A2</option><option>B1</option><option selected>B2</option><option>C1</option></select>
           <select id="pg-n"><option>2</option><option selected>3</option><option>5</option></select>
           <button class="btn" id="pg-go">Tạo</button></div>
-        <p class="mute" style="margin:8px 0 0">Tạo một lần rồi luyện cả tuần. Ở chế độ ChatGPT, mỗi đề là một lần copy–dán.</p>
+        <p class="mute" style="margin:8px 0 0">Tạo một lần rồi luyện cả tuần. Ở chế độ ChatGPT, mỗi đề là một lần copy–dán. Nếu đã nạp đề thật ở mục “Nạp đề”, AI lấy đề thật làm khuôn để đề mới sát văn phong và độ khó.</p>
+        <label class="mute" style="display:block;margin-top:6px"><input type="checkbox" id="pg-verify"> Cho AI tự kiểm tra lại đề sau khi tạo (mỗi câu đúng 1 đáp án, có căn cứ). Chỉ chạy khi AI tự động; mỗi đề tốn thêm 1 lượt.</label>
         <div id="pg-msg"></div>
       </div>
       <div class="row" style="margin:6px 0 12px"><div class="seg" id="gen-f"><button data-f="" class="on">Tất cả</button><button data-f="VSTEP Đọc">Reading</button><button data-f="VSTEP Nghe">Listening</button><button data-f="quick">Thi thử</button><button data-f="toeic">TOEIC</button></div></div>
@@ -493,6 +497,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     <p class="lead">Điểm mới nhất của từng kỹ năng được điền sẵn để quy đổi ra bậc VSTEP.</p>
   </div></div>
   <div class="wrap">
+    <div class="sec" id="focus-sec"><h2>Ôn đúng trọng tâm</h2><p>Web ghi lại dạng câu bạn hay sai khi làm Đọc, Nghe, Ngữ pháp và lỗi trong bài Viết, Nói. Ôn chỗ yếu nhất trước.</p><div id="focus-body"></div></div>
     <div class="panel">
       <h2>Quy đổi điểm</h2>
       <div class="row">
@@ -590,7 +595,7 @@ function show(v){
   if(!VIEWS.includes(v)) v='home';
   VIEWS.forEach(x=>$('#v-'+x).classList.toggle('on',x===v));
   document.querySelectorAll('#menu button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
-  if(v==='progress'){renderScore();renderPack();}
+  if(v==='progress'){renderScore();renderPack();renderFocus();}
   if(v==='vocab') renderVocab();
   if(v==='bank') renderBank();
   if(v==='home') renderHome();
@@ -1012,6 +1017,7 @@ function mcqRoom(body,parts,opt){
       const ex=el.querySelector('.exp');const t=(q.explain_vi||'')+(q.ai_answer?' (đáp án do AI giải, có thể sai)':'')+(has?'':'Không có đáp án.');if(t){ex.textContent=t;ex.classList.remove('hidden');}
       if(Array.isArray(q.why_vi))os.forEach((o,j)=>{const w=q.why_vi[j];if(w)o.insertAdjacentHTML('beforeend',`<div class="why">${esc(String(w).replace(/^[A-D][:.)]\s*/,''))}</div>`);});
     });
+    try{qs.forEach((q,i)=>{if(q.answer!=null&&q.answer>=0&&!q.ai_answer)logQ(isListen?'listening':'reading',QTYPE_VI[q.qtype]?q.qtype:guessQtype(q.q),ans[i]===q.answer);});save();}catch(e){}
     showPart(cur);
     const res=opt.onDone(c,n||1);
     $('#pr').insertAdjacentHTML('afterbegin',`<div class="result">${res}</div>`);$('#pr').scrollTop=0;if(innerWidth<=820)tabs[1].click();
@@ -1042,8 +1048,32 @@ function play(lines,rate){
 
 /* =================== READING =================== */
 const RLV=['B1','B2','B2','C1'];
+const VSTEP_TOPICS=['education and studying abroad','work, jobs and careers','technology and social media','environment and climate','health and lifestyle','travel and tourism','family and generations','city vs countryside life','culture and traditions','science and inventions','shopping and consumerism','transport and traffic','sports and hobbies','media and news','volunteering and community','food and nutrition','housing','artificial intelligence'];
+const pickTopic=()=>VSTEP_TOPICS[Math.floor(Math.random()*VSTEP_TOPICS.length)];
+async function styleRef(skill){
+  /* lấy một đoạn trong đề THẬT đã nạp ở Kho đề làm khuôn văn phong và kiểu câu hỏi */
+  try{const ex=(state.exams||[]).filter(e=>(e.skills||[]).includes(skill));if(!ex.length)return '';
+    const e=ex[Math.floor(Math.random()*ex.length)],d=await getDoc('exam_'+e.id);const sec=(d&&d.sections||[]).filter(x=>x.skill===skill&&(x.questions||[]).length);if(!sec.length)return '';
+    const x=sec[Math.floor(Math.random()*sec.length)],qs=x.questions.slice(0,4).map(q=>'- '+q.q+(q.options?' | '+q.options.join(' / '):'')).join('\n');
+    return `\nSTYLE MODEL — an excerpt from a REAL exam the learner is preparing for. Match its length, register, difficulty, question wording and distractor style closely, but write completely new content (do NOT reuse its topic, sentences or questions):\n"""${String(x.passage||x.text||'').slice(0,1400)}"""\nSample questions:\n${qs}\n`;}catch(e){return '';}
+}
+function verifyOn(){return state.verifyGen!==false&&(!STANDALONE||apiOn());}
+async function verifySet(d,kind){
+  /* bước tự kiểm tra: mỗi câu đúng 1 đáp án, có căn cứ, không lộ đáp án; sửa nếu sai */
+  if(!verifyOn()||!d||!Array.isArray(d.questions))return d;
+  try{const src=kind==='listen'?(d.lines||[]).map(l=>l.speaker+': '+l.text).join('\n'):d.text;
+    const v=await ask(`You are a strict exam reviewer. Check each multiple-choice question against the ${kind==='listen'?'transcript':'passage'}: exactly ONE option must be clearly correct and supported by the text; distractors must be plausible but clearly wrong; the question must not give away the answer; the "answer" index must be right. Fix any faulty question (rewrite it or its options, correct the answer index, update explain_vi/why_vi). Keep good questions unchanged and keep "qtype".
+${kind==='listen'?'Transcript':'Passage'}:\n"""${src}"""\nQuestions JSON:\n${JSON.stringify(d.questions)}
+Return ONLY JSON: {"questions":[same structure, same count],"fixed":number of questions you changed}`);
+    if(Array.isArray(v.questions)&&v.questions.length===d.questions.length&&v.questions.every(q=>Array.isArray(q.options)&&q.options.length===4&&q.answer>=0&&q.answer<=3)){d.questions=v.questions;d._fixed=+v.fixed||0;}}catch(e){}
+  return d;
+}
 async function genReading(lv,words,nq,hint){
-  return ask(`Write an ORIGINAL ${/^A/.test(lv)?'graded (simplified, short sentences, high-frequency words)':'VSTEP.3-5'} reading passage at CEFR ${lv} (~${words} words${hint?', '+hint:''}), on a social/academic topic (random seed ${seed()}; at least sometimes set it in Asia/Vietnam). Number paragraphs like [1], [2]. Then ${nq} multiple-choice questions (4 options) mixing main idea, detail, vocabulary in context ("The word X in paragraph 2 is closest in meaning to"), reference ("it" refers to), inference, author's purpose/attitude. Answers must be unambiguous; spread answer positions.
+  const sref=/^A/.test(lv)?'':await styleRef('reading');
+  const d=await genReading0(lv,words,nq,hint,sref);return verifySet(d,'read');
+}
+async function genReading0(lv,words,nq,hint,sref){
+  return ask(`Write an ORIGINAL ${/^A/.test(lv)?'graded (simplified, short sentences, high-frequency words)':'VSTEP.3-5'} reading passage at CEFR ${lv} (~${words} words${hint?', '+hint:''}), on a social/academic topic typical of VSTEP: ${pickTopic()} (random seed ${seed()}; at least sometimes set it in Asia/Vietnam).${sref||''} Number paragraphs like [1], [2]. Then ${nq} multiple-choice questions (4 options) mixing main idea, detail, vocabulary in context ("The word X in paragraph 2 is closest in meaning to"), reference ("it" refers to), inference, author's purpose/attitude. Answers must be unambiguous; spread answer positions. Tag each question with "qtype": one of main, detail, vocab, reference, inference, purpose.
 Return ONLY JSON: {"title":string,"text":string,"translation_vi":"bản dịch tiếng Việt tự nhiên của TOÀN BÀI, giữ đánh số đoạn [1], [2]…","questions":[{"q":string,"options":[4],"answer":0-3,"explain_vi":"giải thích ngắn bằng tiếng Việt, dẫn câu chứng cứ trong bài","why_vi":["A: vì sao đúng/sai","B: …","C: …","D: …"]}]}
 For "why_vi": one short Vietnamese note per option in order, saying why it is correct or exactly why it is wrong (e.g. not mentioned, contradicts paragraph 2, too general, wrong reference).`);
 }
@@ -1054,7 +1084,7 @@ async function openRead(n,o){
   try{
     const parts=[];
     for(let i=0;i<n;i++){body.innerHTML=spin(`Đang soạn bài đọc ${i+1}/${n}…`);
-      const lv=n===4?RLV[i]:LV;const d=await genReading(lv,n===4?[400,450,500,500][i]:RWORDS[lv],o.nq||10,n===4&&i===3?'more literary or specialised':'');
+      const lv=n===4?RLV[i]:LV;const d=await genReading(lv,n===4?[400,450,500,500][i]:RWORDS[lv],o.nq||10,n===4&&i===3?'more literary or specialised':(o.hint||''));
       parts.push({title:d.title,short:'Passage '+(i+1),text:d.text,translation_vi:d.translation_vi||'',qtitle:`Passage ${i+1}: ${d.title}`,questions:d.questions});}
     runGen(body,{score:'VSTEP Đọc',label:n===4?'Reading đầy đủ (40 câu)':`Reading 1 bài ${LV}: ${parts[0].title}`,minutes:n===4?60:(o.min||15),parts});
   }catch(e){body.innerHTML=`<div class="pane">${errMsg(e)}</div>`}
@@ -1067,10 +1097,11 @@ const LSPEC={
   v3:{t:'Part 3 – Bài giảng',n:15,p:`VSTEP Listening Part 3: 3 separate talks/lectures (~300 words each) by speaker N on academic topics. 5 questions per talk (15 total): main idea, details, speaker's attitude, inference. Insert {"speaker":"N","text":"Talk 2."} before talks 2 and 3.`}
 };
 async function genListen(part,lv){
-  const s=LSPEC[part];
-  return ask(`Create ORIGINAL English listening practice at CEFR ${lv} (seed ${seed()}). ${s.p}
-Questions must be answerable only from the audio; spread answer positions.
+  const s=LSPEC[part],sref=await styleRef('listening');
+  const d=await ask(`Create ORIGINAL English listening practice at CEFR ${lv} (seed ${seed()}; topic area: ${pickTopic()}). ${s.p}${sref}
+Questions must be answerable only from the audio; spread answer positions. Tag each question with "qtype": one of main, detail, inference, purpose, attitude, number.
 Return ONLY JSON: {"title":string,"lines":[{"speaker":"A"|"B"|"N","text":string}],"translation_vi":"bản dịch tiếng Việt của toàn bộ transcript","questions":[{"q":string,"options":[4],"answer":0-3,"explain_vi":"giải thích ngắn tiếng Việt, trích từ khoá nghe được","why_vi":["A: vì sao đúng/sai","B: …","C: …","D: …"]}]}`);
+  return verifySet(d,'listen');
 }
 async function openListen(ps,lvO){
   await ready;const body=openRoom(ps.length>1?'Listening – đề đầy đủ (35 câu)':'Listening – '+LSPEC[ps[0]].t);
@@ -1171,8 +1202,8 @@ async function openWrite(card,givenPrompt){
     try{
       const d=await ask(`${rubric}${vstep?calibBlock('write',task):''}
 Prompt:\n"""${prompt}"""\nCandidate response (${wc(ans)} words):\n"""${ans}"""
-Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên tiếng Việt (English)","score":number,"comment_vi":"1-2 câu nhận xét cụ thể"}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":"exact excerpt","correction":string,"explain_vi":string}] (up to 8 most serious),"improve_vi":["3 việc cụ thể cho bài sau"]}`,'complex');
-      let extra=vstep?calibApply('write',d):'';
+Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên tiếng Việt (English)","score":number,"comment_vi":"1-2 câu nhận xét cụ thể"}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":"exact excerpt","correction":string,"explain_vi":string,"cat":"tense|agreement|article|preposition|word form|word choice|collocation|sentence structure|punctuation/spelling|linking/coherence|plural|other"}] (up to 8 most serious),"improve_vi":["3 việc cụ thể cho bài sau"]}`,'complex');
+      let extra=vstep?calibApply('write',d):'';try{logErrors('Viết',d.errors);}catch(e){}
       if(basic){d.overall=round05(+d.overall);addHist(task==='pt'?'Test đầu vào':'Viết A1–A2',d.overall,task==='pt'?'Test đầu vào: Viết':'Viết A1–A2: '+(prompt.split('\n')[0]||'').slice(0,60));if(card.onResult)card.onResult(d);}
       else if(vstep){const s=round05(+d.overall);d.overall=s;state.lastW[task]=s;
         if(state.lastW.v1!=null&&state.lastW.v2!=null){const tot=round05((state.lastW.v1+2*state.lastW.v2)/3);state.last['VSTEP Viết']=tot;extra+=`<p>Điểm Viết ước tính (Task 1 × 1/3 + Task 2 × 2/3, bài gần nhất mỗi task): <b>${tot}</b>/10</p>`;}
@@ -1194,6 +1225,50 @@ Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên ti�
 
 const W_VSTEP=task=>`You are a strict, calibrated VSTEP.3-5 writing examiner (Vietnam MOET format). Score ${task==='v1'?'Task 1 (letter, min 120 words)':'Task 2 (essay, min 250 words)'} on the 4 VSTEP criteria, each 0-10 in 0.5 steps: 1) Task fulfillment (all required points, register, adequate length — penalise under-length), 2) Organization (paragraphing, coherence, cohesion), 3) Vocabulary (range, accuracy, collocation, spelling), 4) Grammar (range, accuracy, punctuation). overall = mean rounded to 0.5. level: "Bậc 3 (B1)" 4.0-5.5, "Bậc 4 (B2)" 6.0-8.0, "Bậc 5 (C1)" 8.5+, else "Dưới bậc 3". A typical B1 text scores 4-5.5, B2 6-8; memorised templates are penalised.`;
 const S_VSTEP=part=>`You are a calibrated VSTEP.3-5 speaking examiner. Rate this Part ${String(part).slice(1)} response on the 5 VSTEP speaking criteria, each 0-10 (0.5 steps): Grammar (Ngữ pháp), Vocabulary (Từ vựng), Pronunciation (Phát âm), Fluency (Độ trôi chảy), Discourse management (Tổ chức ý). overall = mean rounded to 0.5; level per VSTEP bands.`;
+
+/* =================== ÔN ĐÚNG TRỌNG TÂM: ghi lại lỗi hay sai =================== */
+function mist(){const p=state.profiles&&P();if(!p)return{q:{},e:{},ex:[],g:{}};p.mist=p.mist||{};['q','e','g'].forEach(k=>p.mist[k]=p.mist[k]||{});p.mist.ex=p.mist.ex||[];return p.mist;}
+const QTYPE_VI={main:'Ý chính',detail:'Chi tiết',vocab:'Từ vựng trong ngữ cảnh',reference:'Đại từ thay thế',inference:'Suy luận',purpose:'Mục đích tác giả',attitude:'Thái độ người nói',number:'Số, giờ, giá'};
+function guessQtype(q){const t=String(q||'').toLowerCase();return /closest in meaning|the word|the phrase|meaning of/.test(t)?'vocab':/refers? to/.test(t)?'reference':/infer|impl|suggest|most likely|probably/.test(t)?'inference':/main idea|mainly|best title|primarily about/.test(t)?'main':/purpose|why does the (writer|author)|in order to/.test(t)?'purpose':/attitude|feel|opinion|tone/.test(t)?'attitude':/how (much|many|long)|what time|when |price|cost|number/.test(t)?'number':'detail';}
+function logQ(skill,qt,ok){const m=mist(),k=skill+':'+qt;const r=m.q[k]=m.q[k]||{n:0,w:0};r.n++;if(!ok)r.w++;}
+const ECAT_VI={tense:'Thì động từ',agreement:'Hoà hợp chủ ngữ – động từ',article:'Mạo từ a/an/the',preposition:'Giới từ','word form':'Từ loại (word form)','word choice':'Dùng từ sai nghĩa',collocation:'Collocation','sentence structure':'Cấu trúc câu','punctuation/spelling':'Chính tả, dấu câu','linking/coherence':'Liên kết ý',plural:'Số ít / số nhiều',other:'Khác'};
+function logErrors(src,errs){const m=mist();(errs||[]).forEach(e=>{const c=ECAT_VI[e.cat]?e.cat:'other';m.e[c]=(m.e[c]||0)+1;m.ex.unshift({cat:c,o:String(e.original||'').slice(0,160),c:String(e.correction||'').slice(0,160),src,t:Date.now()});});m.ex=m.ex.slice(0,80);save();}
+function logGram(id,ok){const m=mist();const r=m.g[id]=m.g[id]||{n:0,w:0};r.n++;if(!ok)r.w++;}
+function focusData(){
+  const m=mist(),q=Object.entries(m.q).map(([k,r])=>{const[sk,t]=k.split(':');return{sk,t,n:r.n,w:r.w,acc:r.n?(r.n-r.w)/r.n:1};}).filter(x=>x.n>=3).sort((a,b)=>a.acc-b.acc);
+  const e=Object.entries(m.e).filter(([k])=>k!=='other').sort((a,b)=>b[1]-a[1]);
+  const g=Object.entries(m.g).map(([id,r])=>({id,n:r.n,w:r.w,acc:r.n?(r.n-r.w)/r.n:1})).filter(x=>x.n>=4&&x.acc<0.8).sort((a,b)=>a.acc-b.acc);
+  return{m,q,e,g};
+}
+function gramTitle(id){for(const lv in GRAM)for(const it of GRAM[lv])if(it[0]===id)return[lv,it[1]];return['',id];}
+function renderFocus(){
+  const box=$('#focus-body');if(!box||!state.profiles)return;const{m,q,e,g}=focusData();
+  if(!q.length&&!e.length&&!g.length){box.innerHTML='<div class="panel"><p class="mute" style="margin:0">Chưa đủ dữ liệu. Làm vài bài Đọc, Nghe, Ngữ pháp hoặc chấm bài Viết, Nói; web sẽ tự tìm ra chỗ bạn hay sai.</p></div>';return;}
+  const bar=a=>`<span class="fbar"><i style="width:${Math.round(a*100)}%;background:${a<.6?'var(--red)':a<.8?'var(--warn)':'var(--ok)'}"></i></span>`;
+  box.innerHTML=`<div class="grid2">
+   ${q.length?`<div class="panel"><h3 style="margin-top:0">Đọc & Nghe: dạng câu hỏi</h3>${q.slice(0,6).map(x=>`<div class="frow"><span>${x.sk==='reading'?'Đọc':'Nghe'} · ${QTYPE_VI[x.t]||x.t}</span>${bar(x.acc)}<b>${Math.round(x.acc*100)}%</b><span class="mute">${x.n} câu</span></div>`).join('')}
+     ${q[0].acc<.8?`<div class="row" style="margin-top:8px"><button class="btn sm" id="f-q">Luyện ${q[0].sk==='reading'?'bài đọc':'bài nghe'} tập trung dạng “${QTYPE_VI[q[0].t]||q[0].t}”</button></div>`:''}</div>`:''}
+   ${e.length?`<div class="panel"><h3 style="margin-top:0">Lỗi hay gặp khi Viết & Nói</h3>${e.slice(0,6).map(([k,n])=>`<div class="frow"><span>${ECAT_VI[k]}</span><b>${n} lần</b></div>`).join('')}
+     <details style="margin-top:8px"><summary class="mute">Xem ví dụ lỗi của bạn</summary><ul>${m.ex.filter(x=>x.cat===e[0][0]||x.cat===(e[1]||[])[0]).slice(0,6).map(x=>`<li><s>${esc(x.o)}</s> → <b>${esc(x.c)}</b> <span class="mute">(${ECAT_VI[x.cat]})</span></li>`).join('')}</ul></details></div>`:''}
+   ${g.length?`<div class="panel"><h3 style="margin-top:0">Ngữ pháp còn yếu</h3>${g.slice(0,5).map(x=>{const[lv,t]=gramTitle(x.id);return `<div class="frow"><a href="#" data-g="${x.id}">${lv} · ${esc(t)}</a>${bar(x.acc)}<b>${Math.round(x.acc*100)}%</b></div>`;}).join('')}</div>`:''}
+  </div>
+  <div class="panel" style="margin-top:12px"><div class="row"><b>Bài ôn trọng tâm:</b><select id="f-n"><option>15</option><option selected>20</option><option>30</option></select><button class="btn" id="f-go">Tạo bài ôn từ lỗi của tôi</button></div>
+    <p class="mute" style="margin:6px 0 0">AI soạn bài tập nhắm đúng các lỗi và điểm ngữ pháp ở trên, kèm giải thích. Làm xong web cập nhật lại thống kê.</p><div id="f-msg"></div><div id="f-run" style="margin-top:10px"></div></div>`;
+  box.querySelectorAll('[data-g]').forEach(a=>a.onclick=ev=>{ev.preventDefault();openGram(a.dataset.g);});
+  const fq=$('#f-q');if(fq)fq.onclick=()=>{const x=q[0],lv=dl().level&&!/^A/.test(dl().level)?dl().level:'B2',hint=`focus about half of the questions on the "${x.t}" question type (${QTYPE_VI[x.t]}), with tricky but fair distractors`;
+    x.sk==='reading'?openRead(1,{lv,hint}):openListen(['v3'],lv);};
+  $('#f-go').onclick=async()=>{const b=$('#f-go');b.disabled=true;$('#f-msg').innerHTML=spin('Đang soạn bài ôn theo lỗi của bạn…');
+    try{const lv=dl().level||'B1',n=+$('#f-n').value;
+      const errs=e.slice(0,4).map(([k,c])=>`${k} (${c} errors), e.g. `+m.ex.filter(x=>x.cat===k).slice(0,3).map(x=>`"${x.o}" → "${x.c}"`).join('; ')).join('\n');
+      const gw=g.slice(0,4).map(x=>gramTitle(x.id)[1]).join('; ');
+      const d=await ask(`Create ${n} targeted remedial English exercises for a Vietnamese learner at CEFR ${lv}, preparing for VSTEP. Target ONLY these weaknesses:
+Frequent errors in their own writing/speaking:\n${errs||'(none recorded)'}\nWeak grammar points: ${gw||'(none)'}
+Use new sentences on common VSTEP topics (education, work, technology, environment, health, travel). Mix: "mcq" (4 options, "q" contains "_____"), "type" (fill "_____" with 1–4 words, accepted alternatives), "error" (sentence + 4 parts copied verbatim as "options", one is wrong, "fix"), "trans" (Vietnamese sentence → accepted English translations). Each item has a short Vietnamese "explain_vi" naming the rule.
+Return ONLY JSON: {"exercises":[{"type":"mcq|type|error|trans","q":string,"options":[...],"answer":number|string|[strings],"fix":string,"explain_vi":string}]}`);
+      const items=shuffle((d.exercises||[]).map(gramItem).filter(Boolean));if(!items.length)throw new Error('AI không trả về bài tập.');
+      $('#f-msg').innerHTML='';exQuiz($('#f-run'),items,{onDone:(s,t)=>{addHist('Ôn trọng tâm',`${s}/${t}`,'Ôn trọng tâm theo lỗi');return '';},again:()=>$('#f-go').click()});}
+    catch(err){$('#f-msg').innerHTML=`<p class="mute">${errMsg(err)}</p>`;}finally{b.disabled=false;}};
+}
 
 /* =================== BÀI MẪU CHUẨN: hiệu chỉnh AI chấm theo điểm giám khảo =================== */
 const ANC_CRIT={write:[['tf','Hoàn thành yêu cầu'],['org','Tổ chức bài'],['voc','Từ vựng'],['gram','Ngữ pháp']],speak:[['gram','Ngữ pháp'],['voc','Từ vựng'],['pron','Phát âm'],['flu','Trôi chảy'],['disc','Tổ chức ý']]};
@@ -1364,8 +1439,8 @@ async function openSpeak(card,givenPrompt){
       const d=await ask(`${rubric}${vstep?calibBlock('speak',card.part):''}
 You only have a speech-to-text transcript: judge Pronunciation/Fluency only from indirect evidence (recognition errors, fillers, repetition, length vs about ${Math.round(card.sec/60)} minutes of speech) and say so briefly. Penalise answers clearly too short.
 Task:\n"""${prompt}"""\nTranscript (${wc(ans)} words):\n"""${ans}"""
-Return ONLY JSON: {"criteria":[{"name":"Tiếng Việt (English)","score":number,"comment_vi":string}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":string,"correction":string,"explain_vi":string}] (up to 6),"improve_vi":["3 việc cụ thể kèm 2–3 cụm từ tiếng Anh nên dùng cho đề này"]}`,'complex');
-      const calNote=vstep?calibApply('speak',d):'';
+Return ONLY JSON: {"criteria":[{"name":"Tiếng Việt (English)","score":number,"comment_vi":string}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":string,"correction":string,"explain_vi":string,"cat":"tense|agreement|article|preposition|word form|word choice|collocation|sentence structure|punctuation/spelling|linking/coherence|plural|other"}] (up to 6),"improve_vi":["3 việc cụ thể kèm 2–3 cụm từ tiếng Anh nên dùng cho đề này"]}`,'complex');
+      const calNote=vstep?calibApply('speak',d):'';try{logErrors('Nói',d.errors);}catch(e){}
       if(basic){d.overall=round05(+d.overall);addHist(card.part==='pt'?'Test đầu vào':'Nói A1–A2',d.overall,card.part==='pt'?'Test đầu vào: Nói':'Nói A1–A2: '+card.title);if(card.onResult)card.onResult(d);}
       else if(vstep){d.overall=round05(+d.overall);state.last['VSTEP Nói']=d.overall;addHist('VSTEP Nói '+card.lab,d.overall,`Speaking ${card.lab}: ${card.title}`);}
       else addHist('TOEIC Nói Q11',String(d.overall),'TOEIC Speaking Q11');
@@ -1615,6 +1690,7 @@ $('#pg-go').onclick=async()=>{
 };
 function renderBank(){
   renderGroup();
+  {const v=$('#pg-verify');if(v){v.checked=state.verifyGen!==false;v.onchange=e=>{state.verifyGen=e.target.checked;save();};}}
   const gs=(state.gens||[]).filter(g=>!genF||g.score===genF);
   $('#gen-list').innerHTML=gs.length?gs.map(g=>`<div class="tcard" style="--sk:var(--c-${GC[g.score]||'mix'})"><div class="thumb">${IC[GC[g.score]]||IC.mix}<span class="lab">${GL[g.score]||''}</span></div><div class="body"><h3>${esc(g.label)}</h3><p>${g.n} câu · ${new Date(g.t).toLocaleDateString('vi-VN')} · ${g.runs?`đã làm ${g.runs} lần`:'<b>chưa làm</b>'}</p><div class="row" style="justify-content:space-between"><button class="go" data-gen="${g.id}">${g.runs?'Làm lại':'Làm bài'}</button><button class="go" style="color:var(--mute)" data-gdel="${g.id}">Xoá</button></div></div></div>`).join(''):'<p class="mute">Chưa có đề nào. Làm một bài ở mục Luyện đề hoặc bấm “Tạo” ở trên.</p>';
   $('#gen-list').querySelectorAll('[data-gen]').forEach(b=>b.onclick=()=>openGen(b.dataset.gen));
@@ -2220,7 +2296,7 @@ Return ONLY JSON: {"exercises":[{"type":"mcq|type|error|order|rewrite|trans","q"
       if(items.length<Math.min(n,mode==='mix'?n:6)){$('#g-msg').innerHTML=`<p class="mute">Kho mới có ${items.length} câu${mode==='mix'?'':' dạng này'}. Bấm "Tạo thêm 20 câu" để có đủ ${n} câu, hoặc làm luôn số câu đang có.</p><button class="btn sm" id="g-anyway">Làm ${items.length} câu</button>`;
         if(!items.length){$('#g-anyway').remove();}else $('#g-anyway').onclick=()=>{$('#g-msg').innerHTML='';runEx(items);};return;}
       $('#g-msg').innerHTML='';runEx(items);};
-    const runEx=items=>exQuiz($('#g-run'),items,{onDone:(s,t)=>{mark(`${s}/${t}`);addHist('Ngữ pháp',`${s}/${t}`,`Ngữ pháp ${lv}: ${title}`);return '';},again:()=>$('#g-ex').click()});
+    const runEx=items=>exQuiz($('#g-run'),items,{onItem:(it,ok)=>{logGram(id,ok);},onDone:(s,t)=>{mark(`${s}/${t}`);addHist('Ngữ pháp',`${s}/${t}`,`Ngữ pháp ${lv}: ${title}`);return '';},again:()=>$('#g-ex').click()});
   };
   if(L&&L.intro_vi)return draw();
   $('#g-body').innerHTML=`<p class="mute">Bài học này chưa có. AI sẽ soạn một lần (lý thuyết, ví dụ, lỗi hay gặp và 20 câu bài tập nhiều dạng; tạo thêm lúc nào cũng được), lưu lại để lần sau mở ngay.</p><button class="btn" id="g-gen">Soạn bài học</button>`;
@@ -2376,8 +2452,8 @@ $('#td-wpd').onchange=e=>{const D=dl();D.wpd=+e.target.value;const p=D.days[toda
 document.querySelectorAll('#td-lv button').forEach(b=>b.onclick=()=>{const D=dl();D.level=b.dataset.l;gLv=b.dataset.l;save();td().style.display='none';renderToday();});
 
 /* =================== PROFILES (several learners on one web) =================== */
-const PKEYS=['srs','hist','last','lastW','road','daily','gram','test','plan','chat'];
-function newProfile(name){return{name,srs:{},hist:[],last:{},lastW:{},road:{},daily:{level:'B1',days:{}},gram:{},test:null,plan:null,chat:[]};}
+const PKEYS=['srs','hist','last','lastW','road','daily','gram','test','plan','chat','mist'];
+function newProfile(name){return{name,srs:{},hist:[],last:{},lastW:{},road:{},daily:{level:'B1',days:{}},gram:{},test:null,plan:null,chat:[],mist:{q:{},e:{},ex:[],g:{}}};}
 function P(){return state.profiles[state.cur];}
 function installProfiles(){
   if(!state.profiles||typeof state.profiles!=='object'||!Object.keys(state.profiles).length){
