@@ -620,13 +620,22 @@ const ready=(async()=>{
 
 function makeSR(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return null;
-  let rec=null;const cb={p:()=>{},f:()=>{},s:()=>{}};
-  return{start(){return new Promise((res,rej)=>{rec=new SR();rec.lang='en-US';rec.continuous=true;rec.interimResults=true;
-      rec.onresult=e=>{let it='';for(let i=e.resultIndex;i<e.results.length;i++){const r=e.results[i];if(r.isFinal)cb.f({text:r[0].transcript.trim()});else it+=r[0].transcript;}cb.p({text:it});};
-      rec.onstart=()=>{cb.s({state:'listening'});res();};rec.onend=()=>cb.s({state:'idle',reason:'stopped'});
-      rec.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')rej({code:'not_granted'});};
-      try{rec.start();}catch(err){rej(err);}});},
-    stop(){try{rec&&rec.stop()}catch(e){}return Promise.resolve();},
+  /* Chrome tự ngắt nhận giọng khi im lặng vài giây hoặc sau khoảng 1 phút: tự bật lại cho đến khi người dùng bấm Dừng */
+  let rec=null,want=false,fails=0,lastStart=0;const cb={p:()=>{},f:()=>{},s:()=>{}};
+  const make=()=>{const r=new SR();r.lang='en-US';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
+    r.onresult=e=>{fails=0;let it='';for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i];if(x.isFinal){const t=x[0].transcript.trim();if(t)cb.f({text:t});}else it+=x[0].transcript;}cb.p({text:it});};
+    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){want=false;r._err='không tìm thấy micro';}};
+    r.onend=()=>{if(rec!==r)return;
+      if(want){if(Date.now()-lastStart<1500)fails++;else fails=0;
+        if(fails<6){setTimeout(()=>{if(!want)return;try{rec=make();lastStart=Date.now();rec.start();}catch(e){want=false;cb.s({state:'idle',reason:'không bật lại được'});}},fails?300:50);return;}
+        want=false;cb.s({state:'idle',reason:'trình duyệt ngắt nhận giọng nhiều lần'});return;}
+      cb.s({state:'idle',reason:r._deny?'chưa cho phép micro':r._err||'stopped'});};
+    return r;};
+  return{start(){return new Promise((res,rej)=>{want=true;fails=0;rec=make();let first=true;
+      rec.onstart=()=>{if(first){first=false;cb.s({state:'listening'});res();}};
+      const oe=rec.onerror;rec.onerror=e=>{oe(e);if(first&&(e.error==='not-allowed'||e.error==='service-not-allowed')){first=false;rej({code:'not_granted'});}};
+      try{lastStart=Date.now();rec.start();}catch(err){want=false;rej(err);}});},
+    stop(){want=false;try{rec&&rec.stop()}catch(e){}return Promise.resolve();},
     onPartial(f){cb.p=f},onFinal(f){cb.f=f},onState(f){cb.s=f}};
 }
 /* ---------- storage ---------- */
@@ -1216,22 +1225,24 @@ async function openSpeak(card,givenPrompt){
   const tabs=body.querySelectorAll('.rtabs button');tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));$('#pl').classList.toggle('hide-m',b.dataset.p!=='l');$('#pr').classList.toggle('hide-m',b.dataset.p!=='r');});
   const ta=$('#s-ans');ta.oninput=()=>$('#s-wc').textContent=wc(ta.value)+' từ';
   if($('#s-prep'))$('#s-prep').onclick=()=>startClock(card.prep,()=>{$('#s-mic').click();});
-  const stopMic=()=>{if(dict)dict.stop().catch(()=>{});recStop();};
+  let userStop=false,resumes=0;
+  const stopMic=()=>{userStop=true;if(dict)dict.stop().catch(()=>{});recStop();};
   roomClose=()=>{if(listening)stopMic();recStop(true);};
   let finals='',bound=false;
   const micSt=(cls,html)=>{const m=$('#s-micst');if(m){m.className='micst '+cls;m.innerHTML=html;}};
   $('#s-mic').onclick=()=>{
     if(!dict){ta.focus();startClock(card.sec,()=>{});micSt('warn',micHelp(true));return;}
     if(listening){stopMic();return;}
-    finals=ta.value?ta.value.trimEnd()+' ':'';
+    finals=ta.value?ta.value.trimEnd()+' ':'';userStop=false;resumes=0;
     const p=dict.start();   /* gọi ngay trong cú bấm để trình duyệt hỏi quyền micro */
     recStart();
     if(!bound){bound=true;
       dict.onPartial(({text})=>{ta.value=finals+text;});
       dict.onFinal(({text})=>{finals+=text+' ';ta.value=finals;$('#s-wc').textContent=wc(finals)+' từ';});
       dict.onState(({state:st,reason})=>{listening=st==='listening';$('#s-mic').textContent=listening?'■ Dừng':'🎙 Nói tiếp';
-        if(listening){micSt('on','🔴 Đang nghe… Nói rõ, tự nhiên. Bấm <b>■ Dừng</b> khi xong.');startClock(card.sec,stopMic);}
-        else{stopClock();recStop();micSt('',reason&&!/stop/.test(reason)?`Micro đã dừng (${esc(reason)}). Bấm 🎙 để nói tiếp.`:'Micro đã tắt. Bấm 🎙 để nói tiếp, hoặc sửa chữ nhận sai rồi chấm.');}});}
+        if(listening){micSt('on','🔴 Đang nghe… Nói rõ, tự nhiên. Bấm <b>■ Dừng</b> khi xong.');if(!resumes)startClock(card.sec,stopMic);}
+        else if(!userStop&&!STANDALONE&&resumes<5&&!/denied|not_granted|permission/i.test(reason||'')){resumes++;finals=ta.value?ta.value.trimEnd()+' ':'';Promise.resolve(dict.start()).catch(()=>{stopClock();recStop();micSt('','Micro bị ngắt. Bấm 🎙 Nói tiếp để nói tiếp, chữ đã nhận vẫn giữ nguyên.');});}
+        else{stopClock();recStop();micSt('',reason&&!/stop/.test(reason)?`Micro đã dừng (${esc(reason)}). Bấm 🎙 Nói tiếp, chữ đã nhận vẫn giữ nguyên.`:'Micro đã tắt. Bấm 🎙 để nói tiếp, hoặc sửa chữ nhận sai rồi chấm.');}});}
     Promise.resolve(p).catch(e=>{recStop(true);
       if(e&&e.code==='not_granted')micSt('warn','Bạn chưa cho phép dùng micro. Bấm vào <b>biểu tượng ổ khoá</b> bên trái thanh địa chỉ → <b>Micro</b> → <b>Cho phép</b>, rồi tải lại trang. Trong lúc đó có thể gõ hoặc dùng micro của bàn phím điện thoại.');
       else if(e&&e.code==='dismissed')micSt('warn','Bạn đã đóng hộp hỏi quyền. Bấm 🎙 lần nữa và chọn <b>Cho phép</b>.');
