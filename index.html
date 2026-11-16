@@ -219,6 +219,9 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 .gptbtn .dot.on{background:var(--ok)}.gptbtn .dot.busy{background:var(--warn)}.gptbtn .dot.err{background:var(--red)}
 .fslinks{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .gcode{letter-spacing:.12em;font-size:17px}
+.pctl{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:10px 0 4px;font-size:14px}
+.pctl select{padding:3px 6px}
+.segs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 10px;font-size:14px}
 .foot{border-top:1px solid var(--rule);margin-top:30px;padding:18px 0;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -279,7 +282,6 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
           <tr><td>6.0 – 8.0</td><td><b>Bậc 4 (B2)</b></td><td>L400 · R385 · S160 · W150</td></tr>
           <tr><td>8.5 – 10</td><td><b>Bậc 5 (C1)</b></td><td>L490 · R455 · S180 · W180</td></tr>
         </table></div>
-        <p class="mute">Chuẩn đầu ra UET: bậc 3 (chương trình chuẩn) hoặc bậc 4 (CLC). Hỏi Phòng Đào tạo để chắc đúng khóa của bạn. TOEIC chỉ Nghe–Đọc không được công nhận để xét tốt nghiệp.</p>
       </div>
     </div>
   </div>
@@ -731,7 +733,8 @@ async function acctInit(){
   if(!SUPA_URL||!SUPA_KEY||/DAN_/.test(SUPA_URL+SUPA_KEY))return;
   $('#acct-btn').classList.remove('hidden');$('#acct-btn').onclick=openAcct;
   if(!window.supabase){syncSt('err');return;}
-  try{supa=window.supabase.createClient(SUPA_URL,SUPA_KEY);
+  try{supa=window.supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storage:window.localStorage}});
+    supa.auth.onAuthStateChange((ev,ses)=>{if(ev==='SIGNED_OUT'&&acct){acct=null;db=null;acctChip();}else if(ses&&ses.user&&!acct&&ev!=='INITIAL_SESSION'){useAcct(ses.user);}});
     const{data}=await supa.auth.getSession();if(data&&data.session)useAcct(data.session.user);}catch(e){supa=null;syncSt('err');}
   acctChip();
 }
@@ -896,7 +899,7 @@ function renderPractice(){
     `<div class="sec" id="s-basic"><h2>Nền tảng A1–A2</h2><p>Bài ngắn, từ dễ, nói chậm, dành cho người mới bắt đầu hoặc muốn lấy lại gốc. Đề theo mức A1 hoặc A2 đang chọn ở thanh độ khó (nếu đang chọn B1 trở lên thì dùng A2).</p><div class="grid">${CAT.basic.map(o=>tcard({...o,act:'basic:'+o.id})).join('')}</div></div>`+
     s('s-speak','','Speaking','Thi trên máy khoảng 12 phút, 3 phần. Bấm mic để nói, web chuyển lời nói thành chữ để chấm theo 5 tiêu chí VSTEP.',CAT.speak,'speak','speak')+
     s('s-write','','Writing','60 phút: Task 1 thư (1/3 điểm) và Task 2 luận (2/3 điểm). Chấm theo 4 tiêu chí: hoàn thành yêu cầu, tổ chức bài, từ vựng, ngữ pháp.',CAT.write,'write','write')+
-    s('s-listen','','Listening','35 câu, khoảng 40 phút, 3 phần. Mỗi đoạn chỉ nghe 1 lần như thi thật; transcript mở sau khi nộp.',CAT.listen,'listen','listen')+
+    s('s-listen','','Listening','35 câu, khoảng 40 phút, 3 phần. Nghe lại bao nhiêu lần cũng được, có chỉnh tốc độ; bật Chế độ thi nếu muốn nghe 1 lần như thật. Transcript mở sau khi nộp.',CAT.listen,'listen','listen')+
     s('s-read','','Reading','40 câu, 60 phút, 4 bài đọc. Kỹ năng: ý chính, chi tiết, từ vựng trong ngữ cảnh, quy chiếu, suy luận.',CAT.read,'read','read')+
     `<div class="sec" id="s-full"><h2>Thi thử</h2><p>Làm liền mạch để biết mình đang ở bậc nào.</p><div class="grid">
       ${tcard({c:'mix',lab:'15 phút',title:'Thi thử nhanh',desc:'1 bài đọc ngắn + 4 thông báo nghe, rồi gợi ý làm 1 Task Viết và 1 Part Nói.',tags:[['4 kỹ năng'],['Nhanh','o']],act:'quick:',go:'Bắt đầu'})}
@@ -948,7 +951,12 @@ function mcqRoom(body,parts,opt){
       h+=p.audioUrl?`<audio controls src="${p.audioUrl}" style="width:100%;margin-bottom:10px"></audio>`:`<div class="player"><div><b>File nghe của đề</b><div class="st">Chọn file mp3 đi kèm đề để phát</div><input type="file" accept="audio/*" id="apick" style="margin-top:8px;background:#fff;color:#162033"></div></div>`;
       h+=p.lines&&p.lines.length&&done?`<h4>Transcript</h4><div class="ptext">${esc(p.lines.map(l=>l.text).join('\n\n'))}</div>`:'';
     }else if(p.lines){
-      h+=`<div class="player"><button id="pp">▶</button><div><b>${esc(p.title||'Audio')}</b><div class="st" id="pst">${done?'Có thể nghe lại và xem transcript':'Đọc câu hỏi trước, bấm ▶ để nghe (1 lần)'}</div></div></div>`;
+      const exam=!!state.listenExam,lockSeg=exam&&!done;
+      h+=`<div class="player"><button id="pp">▶</button><div><b>${esc(p.title||'Audio')}</b><div class="st" id="pst">${done?'Nghe lại thoải mái và xem transcript':exam?'Chế độ thi: đọc câu hỏi trước, bấm ▶ để nghe (1 lần)':'Bấm ▶ để nghe. Nghe lại bao nhiêu lần cũng được.'}</div></div></div>
+      <div class="pctl"><label><input type="checkbox" id="p-exam" ${exam?'checked':''}> Chế độ thi (chỉ nghe 1 lần)</label>
+        <label>Tốc độ <select id="p-rate">${[[.75,'0.75×'],[.9,'0.9×'],[1,'1×'],[1.15,'1.15×']].map(([v,t])=>`<option value="${v}" ${(+state.listenRate||1)===v?'selected':''}>${t}</option>`).join('')}</select></label>
+        <span class="mute" id="p-cnt">${p._n?'Đã nghe '+p._n+' lần':''}</span></div>
+      ${p.lines.length>1&&!lockSeg?`<div class="segs"><span class="mute">Nghe lại từng đoạn:</span>${p.lines.map((l,k)=>`<button class="mb" data-seg="${k}">▶ ${k+1}</button>`).join('')}</div>`:''}`;
       if(p.audioNote)h+=`<p class="mute">${esc(p.audioNote)}</p>`;
       h+=done?`<h4>Transcript</h4><div class="ptext">${esc(p.lines.map(l=>(l.speaker&&l.speaker!=='N'?l.speaker+': ':'')+l.text).join('\n\n'))}</div>`:`<p class="mute">Transcript sẽ hiện sau khi nộp bài.</p>`;
     }else{
@@ -959,8 +967,17 @@ function mcqRoom(body,parts,opt){
     $('#pl').querySelectorAll('.ptabs button').forEach(b=>b.onclick=()=>showPart(+b.dataset.k));
     if($('#tr-tg'))$('#tr-tg').onclick=()=>{p._showTr=!p._showTr;showPart(i);if(p._showTr)$('#pl .tr').scrollIntoView({behavior:'smooth'});};
     if(p.audioPick&&$('#apick'))$('#apick').onchange=e=>{const f=e.target.files[0];if(f){p.audioUrl=URL.createObjectURL(f);showPart(i);}};
-    if(p.lines&&!p.audioPick){const b=$('#pp');let played=p._played&&!done;if(played){b.disabled=true;$('#pst').textContent='Đã nghe. Hoàn thành câu hỏi bên cạnh.';}
-      b.onclick=()=>{p._played=true;b.disabled=true;$('#pst').textContent='Đang phát…';play(p.lines).finally(()=>{$('#pst').textContent=done?'Có thể nghe lại':'Đã nghe xong.';if(done)b.disabled=false;});};}
+    if(p.lines&&!p.audioPick){const b=$('#pp'),st=$('#pst'),exam=!!state.listenExam&&!done;let on=false;
+      const rate=()=>+state.listenRate||1;
+      const lock=()=>{b.disabled=true;st.textContent='Đã nghe 1 lần (chế độ thi). Hoàn thành câu hỏi bên cạnh.';};
+      if(exam&&p._played)lock();
+      const run=(lines,label)=>{on=true;b.textContent='■';st.textContent=label;p._played=true;p._n=(p._n||0)+(lines===p.lines?1:0);
+        const c=$('#p-cnt');if(c&&p._n)c.textContent='Đã nghe '+p._n+' lần';
+        play(lines,rate()).finally(()=>{if(!b.isConnected)return;on=false;b.textContent='▶';if(exam)lock();else st.textContent='Nghe xong. Bấm ▶ để nghe lại, hoặc nghe từng đoạn bên dưới.';});};
+      b.onclick=()=>{if(on){stopPlay();on=false;b.textContent='▶';st.textContent='Đã dừng. Bấm ▶ để nghe lại từ đầu.';if(exam)lock();return;}run(p.lines,'Đang phát… bấm ■ để dừng');};
+      $('#pl').querySelectorAll('[data-seg]').forEach(x=>x.onclick=()=>{stopPlay();run([p.lines[+x.dataset.seg]],`Đang phát đoạn ${+x.dataset.seg+1}…`);});
+      $('#p-exam').onchange=e=>{state.listenExam=e.target.checked;save();stopPlay();showPart(i);};
+      $('#p-rate').onchange=e=>{state.listenRate=+e.target.value;save();};}
     $('#pl').scrollTop=0;
   }
   $('#pr').innerHTML=(opt.resultSlot?'<div id="rres"></div>':'')+qs.map((q,i)=>`${i===0||qs[i-1].pi!==q.pi?`<h4 style="margin:16px 0 0">${esc(parts[q.pi].qtitle||parts[q.pi].title||'')}</h4>`:''}<div class="q" id="q${i}"><div><span class="qn">${i+1}</span><span class="qt">${esc(q.q)}</span></div>${q.options.map((o,j)=>`<label class="opt"><input type="radio" name="o${i}" value="${j}"><span><b>${'ABCD'[j]}.</b> ${esc(o)}</span></label>`).join('')}<div class="exp hidden"></div></div>`).join('');
@@ -994,12 +1011,16 @@ function vstepRes(skill,c,n,label){
 }
 
 /* ---- audio ---- */
-function play(lines){
+let playTok=0;
+function stopPlay(){playTok++;try{if(tts){tts.stop&&tts.stop();tts.cancel&&tts.cancel();}}catch(e){}try{if('speechSynthesis' in window)speechSynthesis.cancel();}catch(e){}}
+function play(lines,rate){
+  const tok=++playTok;rate=rate||1;
   return new Promise(res=>{
     if(tts){const V={A:'buttery',B:'airy',C:'glassy',N:'rounded'};
       tts.speak(lines.map(l=>({text:l.text,voice:V[l.speaker]||'rounded',language:'en'}))).catch(()=>{}).finally(res);return;}
     if('speechSynthesis' in window){speechSynthesis.cancel();const vs=speechSynthesis.getVoices().filter(v=>/^en/i.test(v.lang));
-      lines.forEach((l,i)=>{const u=new SpeechSynthesisUtterance(l.text);u.lang='en-US';u.rate=.95;const k={A:0,B:1,C:2,N:3}[l.speaker]||0;if(vs.length)u.voice=vs[k%vs.length];if(i===lines.length-1){u.onend=res;u.onerror=res;}speechSynthesis.speak(u);});
+      if(tok!==playTok)return res();
+      lines.forEach((l,i)=>{const u=new SpeechSynthesisUtterance(l.text);u.lang='en-US';u.rate=.95*rate;const k={A:0,B:1,C:2,N:3}[l.speaker]||0;if(vs.length)u.voice=vs[k%vs.length];if(i===lines.length-1){u.onend=res;u.onerror=res;}speechSynthesis.speak(u);});
       return;}
     res();
   });
@@ -1860,7 +1881,7 @@ function exQuiz(el,items,opt){
       if(go.dataset.next){i++;return next();}
       let ok;
       if(it.t==='mcq'){if(sel<0)return;ok=sel===it.answer;const os=el.querySelectorAll('.opt');os[it.answer].classList.add('ok');if(!ok)os[sel].classList.add('bad');el.querySelectorAll('input').forEach(x=>x.disabled=true);}
-      else if(it.t==='free'){const v=normA(inp.value);if(!v)return;ok=it.own?ownOK(inp.value,it.key):transOK(inp.value,it.answer,it.key);inp.disabled=true;inp.style.borderColor=ok?'var(--ok)':'var(--red)';}
+      else if(it.t==='free'){const v=normA(inp.value);if(!v)return;ok=it.own?ownOK(inp.value,it.key):(it.alts||[it.answer]).some(a=>transOK(inp.value,a,it.key));inp.disabled=true;inp.style.borderColor=ok?'var(--ok)':'var(--red)';}
       else{const v=normA(inp.value);if(!v)return;ok=[].concat(it.answer).map(normA).includes(v);inp.disabled=true;inp.style.borderColor=ok?'var(--ok)':'var(--red)';}
       total++;if(ok)score++;else wrong.push(it);opt.onItem&&opt.onItem(it,ok);
       const ex=q('.ex-exp');ex.innerHTML=(ok?'<b style="color:var(--ok)">Đúng.</b> ':'<b style="color:var(--red)">Chưa đúng.</b> '+(it.t!=='mcq'?`Đáp án: <b>${esc([].concat(it.answer)[0])}</b>. `:''))+fmt(it.explain||'');ex.classList.remove('hidden');
@@ -2031,10 +2052,17 @@ function renderGrammar(){
   $('#g-list').innerHTML=list.map((t,i)=>{const g=state.gram[t[0]]||{};return `<div class="grow"><span class="bub ${g.done?'on':''}">${i+1}</span><div><b>${esc(t[1])}</b><div class="mute">${esc(t[2])}${g.score?` · bài tập ${esc(g.score)}`:''}</div></div><button class="btn ${g.done?'ghost':''} sm" data-g="${t[0]}">${g.done?'Ôn lại':'Học'}</button></div>`;}).join('');
   $('#g-list').querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>openGram(b.dataset.g));
 }
+const GMODES=[['mix','Trộn tất cả'],['mcq','Trắc nghiệm'],['type','Điền dạng đúng'],['error','Tìm lỗi sai'],['order','Sắp xếp câu'],['rewrite','Viết lại câu'],['trans','Dịch sang tiếng Anh']];
 function gramItem(e){
-  if(e.type==='type'||!Array.isArray(e.options))return{t:'type',q:e.q,answer:[].concat(e.answer),explain:e.explain_vi||'',review:e.q};
-  return{t:'mcq',q:e.q,options:e.options,answer:+e.answer,explain:e.explain_vi||'',review:e.q+' → '+e.options[+e.answer]};
+  const ex=e.explain_vi||'',ans=[].concat(e.answer||[]).filter(Boolean);
+  if(e.type==='error'&&Array.isArray(e.options))return{t:'mcq',q:'Tìm phần SAI trong câu: '+e.q,options:e.options,answer:+e.answer,explain:(e.fix?'Sửa đúng: `'+e.fix+'`. ':'')+ex,review:e.q+(e.fix?' → '+e.fix:''),gt:'error'};
+  if(e.type==='order'&&ans[0]){const toks=String(ans[0]).trim().split(/\s+/);if(toks.length>=3&&toks.length<=18)return{t:'order',tokens:toks,q:'Sắp xếp thành câu đúng'+(e.vi?`: “${e.vi}”`:''),explain:ex,review:ans[0],gt:'order'};return null;}
+  if(e.type==='rewrite'&&ans[0])return{t:'free',q:'Viết lại câu, giữ nguyên nghĩa'+(e.hint?` (${e.hint})`:'')+': '+e.q,answer:ans[0],alts:ans,key:'',explain:ex+(ans.length>1?' Cách khác: '+ans.slice(1).join(' / '):''),review:e.q+' → '+ans[0],gt:'rewrite'};
+  if(e.type==='trans'&&ans[0])return{t:'free',q:`Dịch sang tiếng Anh: “${e.q}”`,answer:ans[0],alts:ans,key:'',explain:ex+(ans.length>1?' Cách khác: '+ans.slice(1).join(' / '):''),review:e.q+' → '+ans[0],gt:'trans'};
+  if(e.type==='type'||!Array.isArray(e.options))return{t:'type',q:e.q,answer:ans,explain:ex,review:e.q,gt:'type'};
+  return{t:'mcq',q:e.q,options:e.options,answer:+e.answer,explain:ex,review:e.q+' → '+e.options[+e.answer],gt:'mcq'};
 }
+function gramPick(L,mode,n){let it=(L.exercises||[]).map(gramItem).filter(Boolean);if(mode!=='mix')it=it.filter(x=>x.gt===mode);return shuffle(it).slice(0,n);}
 async function openGram(id){
   const f=gramFind(id);if(!f)return;const [lv,,title,sum]=f;
   if(!$('#v-grammar').classList.contains('on'))show('grammar');
@@ -2049,19 +2077,40 @@ async function openGram(id){
       ${(L.usage||[]).length?`<h4>Cách dùng</h4><ul>${L.usage.map(u=>`<li>${esc(u.vi)}<br><span class="en">${esc(u.en)}</span> <span class="mute">${esc(u.ex_vi||'')}</span></li>`).join('')}</ul>`:''}
       ${(L.notes_vi||[]).length?`<h4>Lưu ý</h4><ul>${L.notes_vi.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>`:''}
       ${(L.mistakes||[]).length?`<h4>Lỗi hay gặp</h4>${L.mistakes.map(m=>`<div class="err"><s>${esc(m.wrong)}</s> → <ins>${esc(m.right)}</ins><div class="mute">${esc(m.why_vi)}</div></div>`).join('')}`:''}
-      <div class="row" style="margin-top:14px"><button class="btn" id="g-ex">Làm bài tập (${(L.exercises||[]).length} câu)</button><button class="btn ghost" id="g-done">${(state.gram[id]||{}).done?'Đã học ✓':'Đánh dấu đã học'}</button></div><div id="g-run" style="margin-top:12px"></div>`;
+      <h4 style="margin-top:18px">Bài tập</h4>
+      <div class="row"><label class="mute">Dạng <select id="g-mode">${GMODES.map(([k,t])=>`<option value="${k}" ${state.gMode===k?'selected':''}>${t}</option>`).join('')}</select></label>
+        <label class="mute">Số câu <select id="g-n">${[10,20,30,50].map(v=>`<option ${(+state.gN||20)===v?'selected':''}>${v}</option>`).join('')}</select></label>
+        <span class="mute" id="g-bank"></span></div>
+      <div class="row" style="margin-top:10px"><button class="btn" id="g-ex">Làm bài tập</button><button class="btn ghost" id="g-more">＋ Tạo thêm 20 câu</button><button class="btn ghost" id="g-done">${(state.gram[id]||{}).done?'Đã học ✓':'Đánh dấu đã học'}</button></div><div id="g-msg"></div><div id="g-run" style="margin-top:12px"></div>`;
+    const bankInfo=()=>{const all=(L.exercises||[]).map(gramItem).filter(Boolean),c={};all.forEach(x=>c[x.gt]=(c[x.gt]||0)+1);
+      $('#g-bank').textContent=`Kho bài này có ${all.length} câu`+(Object.keys(c).length>1?' ('+GMODES.filter(([k])=>c[k]).map(([k,t])=>t.toLowerCase()+' '+c[k]).join(', ')+')':'');};
+    bankInfo();
+    $('#g-mode').onchange=e=>{state.gMode=e.target.value;save();};$('#g-n').onchange=e=>{state.gN=+e.target.value;save();};
     const mark=(score)=>{state.gram[id]=Object.assign(state.gram[id]||{},{done:true,t:Date.now()},score?{score}:{});
       const p=dl().days[todayKey()];if(p&&p.gram===id){p.done.gram=true;}if(p&&p.tasks)p.tasks.forEach((x,i)=>{if(x.type==='grammar'&&x.id===id)p.done['t'+i]=true;});save();renderGrammar();$('#g-done').textContent='Đã học ✓';};
     $('#g-done').onclick=()=>mark();
-    $('#g-ex').onclick=()=>exQuiz($('#g-run'),shuffle((L.exercises||[]).map(gramItem)),{onDone:(s,t)=>{mark(`${s}/${t}`);addHist('Ngữ pháp',`${s}/${t}`,`Ngữ pháp ${lv}: ${title}`);return '';},again:()=>$('#g-ex').click()});
+    const more=async(silent)=>{const btn=$('#g-more');btn.disabled=true;$('#g-msg').innerHTML=spin('Đang soạn thêm 20 câu bài tập…');
+      try{const have=(L.exercises||[]).map(x=>x.q).slice(-60).join(' | ').slice(0,3000);
+        const d=await ask(`Write 20 NEW grammar exercises for Vietnamese learners on "${title}" (${sum}) at CEFR ${lv}. Vocabulary at ${lv}. Vary topics and sentence patterns; do NOT repeat these existing items: ${have}
+Mix exactly: 5 "mcq" (4 options, "q" contains "_____"), 4 "type" (fill "_____" with 1–4 words, list accepted alternatives), 4 "error" (a sentence with 4 underlined parts given as "options" copied verbatim from the sentence, exactly one is wrong; "fix" = corrected part), 3 "order" (answer = one correct sentence of 5–14 words; "vi" = its Vietnamese meaning), 2 "rewrite" ("q" = original sentence, "hint" = start words or keyword in Vietnamese, "answer" = accepted rewrites), 2 "trans" ("q" = a Vietnamese sentence, "answer" = accepted English translations using this grammar point). Every item has a short Vietnamese "explain_vi".
+Return ONLY JSON: {"exercises":[{"type":"mcq|type|error|order|rewrite|trans","q":string,"options":[...],"answer":number|string|[strings],"fix":string,"vi":string,"hint":string,"explain_vi":string}]}`);
+        const add=(d.exercises||[]).filter(x=>x&&x.q||x&&x.type==='order');L.exercises=(L.exercises||[]).concat(add);await putDoc('gram_'+id,L);
+        $('#g-msg').innerHTML=`<p class="mute">Đã thêm ${add.length} câu.</p>`;bankInfo();return add.length;}
+      catch(e){$('#g-msg').innerHTML=`<p class="mute">${errMsg(e)}</p>`;return 0;}finally{btn.disabled=false;}};
+    $('#g-more').onclick=()=>more();
+    $('#g-ex').onclick=async()=>{const mode=$('#g-mode').value,n=+$('#g-n').value;let items=gramPick(L,mode,n);
+      if(items.length<Math.min(n,mode==='mix'?n:6)){$('#g-msg').innerHTML=`<p class="mute">Kho mới có ${items.length} câu${mode==='mix'?'':' dạng này'}. Bấm "Tạo thêm 20 câu" để có đủ ${n} câu, hoặc làm luôn số câu đang có.</p><button class="btn sm" id="g-anyway">Làm ${items.length} câu</button>`;
+        if(!items.length){$('#g-anyway').remove();}else $('#g-anyway').onclick=()=>{$('#g-msg').innerHTML='';runEx(items);};return;}
+      $('#g-msg').innerHTML='';runEx(items);};
+    const runEx=items=>exQuiz($('#g-run'),items,{onDone:(s,t)=>{mark(`${s}/${t}`);addHist('Ngữ pháp',`${s}/${t}`,`Ngữ pháp ${lv}: ${title}`);return '';},again:()=>$('#g-ex').click()});
   };
   if(L&&L.intro_vi)return draw();
-  $('#g-body').innerHTML=`<p class="mute">Bài học này chưa có. AI sẽ soạn một lần (lý thuyết, ví dụ, lỗi hay gặp và 10 câu bài tập), lưu lại để lần sau mở ngay.</p><button class="btn" id="g-gen">Soạn bài học</button>`;
+  $('#g-body').innerHTML=`<p class="mute">Bài học này chưa có. AI sẽ soạn một lần (lý thuyết, ví dụ, lỗi hay gặp và 20 câu bài tập nhiều dạng; tạo thêm lúc nào cũng được), lưu lại để lần sau mở ngay.</p><button class="btn" id="g-gen">Soạn bài học</button>`;
   $('#g-gen').onclick=async()=>{
     $('#g-body').innerHTML=spin('Đang soạn bài học… (20–40 giây)');
     try{L=await ask(`You are an English grammar teacher for Vietnamese learners. Write a concise lesson on "${title}" (${sum}) at CEFR ${lv}. Explanations in Vietnamese; examples in English with Vietnamese translation; keep vocabulary at ${lv} level.
-Then 10 exercises testing exactly this point at ${lv}: 6 multiple-choice (4 options) and 4 typing items whose answer is 1–4 words (fill the blank with the correct form; list accepted alternatives). Each "q" contains "_____" for the blank.
-Return ONLY JSON: {"intro_vi":string,"form":[{"label":"dạng (khẳng định/phủ định/nghi vấn…)","pattern":"S + V…"}],"usage":[{"vi":"cách dùng","en":"example","ex_vi":"dịch"}],"notes_vi":[string],"mistakes":[{"wrong":string,"right":string,"why_vi":string}],"exercises":[{"type":"mcq","q":string,"options":[4 strings],"answer":0-3,"explain_vi":string},{"type":"type","q":string,"answer":["accepted","alternative"],"explain_vi":string}]}`);
+Then 20 exercises testing exactly this point at ${lv}: 6 "mcq" (4 options, "q" contains "_____"), 4 "type" (fill "_____" with 1–4 words; list accepted alternatives), 4 "error" (sentence + 4 parts copied verbatim from it as "options", exactly one wrong, "fix" = the corrected part), 3 "order" ("answer" = one correct sentence of 5–14 words, "vi" = its Vietnamese meaning), 3 "trans" ("q" = Vietnamese sentence, "answer" = accepted English translations).
+Return ONLY JSON: {"intro_vi":string,"form":[{"label":"dạng (khẳng định/phủ định/nghi vấn…)","pattern":"S + V…"}],"usage":[{"vi":"cách dùng","en":"example","ex_vi":"dịch"}],"notes_vi":[string],"mistakes":[{"wrong":string,"right":string,"why_vi":string}],"exercises":[{"type":"mcq","q":string,"options":[4 strings],"answer":0-3,"explain_vi":string},{"type":"type","q":string,"answer":["accepted","alternative"],"explain_vi":string},{"type":"error","q":string,"options":[4 parts],"answer":0-3,"fix":string,"explain_vi":string},{"type":"order","q":"","answer":"sentence","vi":string,"explain_vi":string},{"type":"trans","q":"câu tiếng Việt","answer":["English"],"explain_vi":string}]}`);
       await putDoc('gram_'+id,L);draw();
     }catch(e){$('#g-body').innerHTML=`<p class="mute">${errMsg(e)}</p><button class="btn" onclick="openGram('${id}')">Thử lại</button>`;}
   };
