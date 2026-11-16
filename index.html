@@ -618,13 +618,14 @@ const ready=(async()=>{
   if(supa&&(!acct&&!lsGet('vstep-localonly')||acct&&/type=recovery|#reset/.test(location.href)))openAcct();
 })();
 
+const BROWSER_NOSR=/coc_coc|brave|opr\/|yabrowser/i.test(navigator.userAgent)||!!(navigator.brave);
 function makeSR(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return null;
   /* Chrome tự ngắt nhận giọng khi im lặng vài giây hoặc sau khoảng 1 phút: tự bật lại cho đến khi người dùng bấm Dừng */
   let rec=null,want=false,fails=0,lastStart=0;const cb={p:()=>{},f:()=>{},s:()=>{}};
   const make=()=>{const r=new SR();r.lang='en-US';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
     r.onresult=e=>{fails=0;let it='';for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i];if(x.isFinal){const t=x[0].transcript.trim();if(t)cb.f({text:t});}else it+=x[0].transcript;}cb.p({text:it});};
-    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){want=false;r._err='không tìm thấy micro';}};
+    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){want=false;r._err='không tìm thấy micro';}else if(e.error==='network'){want=false;r._err=BROWSER_NOSR?'Cốc Cốc không có dịch vụ nhận giọng của Google, hãy mở web bằng Chrome hoặc Edge':'không kết nối được dịch vụ nhận giọng, kiểm tra mạng';}};
     r.onend=()=>{if(rec!==r)return;
       if(want){if(Date.now()-lastStart<1500)fails++;else fails=0;
         if(fails<6){setTimeout(()=>{if(!want)return;try{rec=make();lastStart=Date.now();rec.start();}catch(e){want=false;cb.s({state:'idle',reason:'không bật lại được'});}},fails?300:50);return;}
@@ -1190,6 +1191,7 @@ Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên ti�
 /* =================== SPEAKING =================== */
 let listening=false;
 function micHelp(fail){
+  if(STANDALONE&&BROWSER_NOSR)return '⚠️ Bạn đang dùng <b>Cốc Cốc</b> (hoặc trình duyệt tương tự). Trình duyệt này thường <b>không chuyển giọng nói thành chữ được</b> hoặc bị ngắt liên tục. Hãy mở web bằng <b>Google Chrome</b> hoặc <b>Microsoft Edge</b> để luyện nói. Trong lúc đó vẫn có thể bấm thử, hoặc gõ câu trả lời vào ô dưới.';
   if(dict)return fail?'Thử lại trên Chrome hoặc Edge, kiểm tra micro đã cắm và không bị app khác chiếm.':'🎙 Bấm <b>Bắt đầu nói</b>. Lần đầu trình duyệt sẽ hỏi quyền micro, chọn <b>Cho phép</b>. Lời nói sẽ hiện thành chữ trong ô dưới.';
   return STANDALONE?'Trình duyệt này không nhận giọng nói. Mở web bằng <b>Chrome</b> hoặc <b>Edge</b> trên máy tính, hoặc bấm nút micro trên bàn phím điện thoại để nói vào ô dưới.'
     :'Micro trong web chỉ chạy khi mở link bằng <b>Chrome hoặc Edge trên máy tính</b> (hoặc app Claude trên máy tính). Trên app Claude điện thoại hay Safari thì chưa hỗ trợ: bấm nút micro trên <b>bàn phím điện thoại</b> để nói vào ô dưới (đừng sửa lỗi ngữ pháp).';
