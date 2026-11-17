@@ -227,6 +227,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
 .frow{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:14.5px}.frow>span:first-child,.frow>a{flex:1}
 .fbar{width:90px;height:8px;background:var(--ink-2);border-radius:4px;overflow:hidden;display:inline-block}.fbar i{display:block;height:100%}
+.thumbs{display:flex;flex-wrap:wrap;gap:6px}.th{position:relative;width:72px;height:96px;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:#fff}.th img{width:100%;height:100%;object-fit:cover}.th .x{position:absolute;top:2px;right:2px;border:0;background:rgba(0,0,0,.6);color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;line-height:18px}
 .foot{border-top:1px solid var(--rule);margin-top:30px;padding:18px 0;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -473,16 +474,23 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     <div class="sec">
       <h2>Nạp đề</h2>
       <div class="panel">
-        <p class="mute" style="margin-top:0">PDF phải có chữ chọn được (bản scan ảnh không đọc được). Nên nạp từng kỹ năng để AI tách câu chính xác.</p>
+        <p class="mute" style="margin-top:0">Tải lên <b>PDF</b> (cả bản scan), <b>ảnh chụp</b> trang sách hay đề (JPG/PNG, chọn nhiều ảnh một lúc), hoặc <b>.txt</b>; cũng có thể dán chữ vào ô. Nên nạp từng kỹ năng để tách câu chính xác.</p>
         <div class="row" style="margin-bottom:8px">
-          <input type="file" id="b-file" accept=".pdf,.txt,text/plain,application/pdf">
+          <label class="btn ghost" style="cursor:pointer">📎 Chọn file hoặc ảnh<input type="file" id="b-file" multiple accept=".pdf,.txt,text/plain,application/pdf,image/*,.jpg,.jpeg,.png,.webp" class="hidden"></label>
+          <label class="btn ghost" style="cursor:pointer">📷 Chụp ảnh<input type="file" id="b-cam" accept="image/*" capture="environment" class="hidden"></label>
           <select id="b-type"><option value="vstep">Đề VSTEP</option><option value="toeic">Đề TOEIC</option><option value="other">Đề khác</option></select>
         </div>
-        <textarea id="b-text" style="min-height:160px" placeholder="Hoặc dán nội dung đề (kèm đáp án nếu có)…"></textarea>
+        <div id="b-imgs"></div>
+        <textarea id="b-text" style="min-height:140px;margin-top:8px" placeholder="Hoặc dán nội dung đề hay tài liệu (kèm đáp án nếu có)…"></textarea>
         <div class="row" style="justify-content:space-between;margin-top:8px">
           <label class="mute"><input type="checkbox" id="b-solve" checked> Đề không có đáp án thì để AI giải (có thể sai)</label>
-          <button class="btn" id="b-import">Nạp đề</button>
+          <div class="row"><button class="btn" id="b-import">Nạp đề có sẵn</button><button class="btn ghost" id="b-make">Tạo đề mới từ tài liệu</button></div>
         </div>
+        <div class="row" id="b-mkopt" style="margin-top:6px"><span class="mute">Tạo đề mới:</span>
+          <select id="b-mkkind"><option value="auto">AI tự chọn dạng bài hợp với tài liệu</option><option value="reading">Câu hỏi đọc hiểu (giữ nguyên bài đọc)</option><option value="vocab">Bài tập từ vựng trong tài liệu</option><option value="grammar">Bài tập ngữ pháp trong tài liệu</option><option value="mixed">Đề tổng hợp</option></select>
+          <select id="b-mkn"><option>10</option><option selected>20</option><option>30</option></select>
+          <select id="b-mklv"><option>A2</option><option selected>B1</option><option>B2</option><option>C1</option></select></div>
+        <p class="mute" style="margin:6px 0 0"><b>Nạp đề có sẵn</b>: giữ nguyên đề trong tài liệu để làm bấm giờ. <b>Tạo đề mới</b>: dùng sách, bài đọc, danh sách từ, ghi chép của bạn để AI ra câu hỏi luyện tập.</p>
         <div id="b-msg"></div>
       </div>
     </div>
@@ -838,8 +846,8 @@ function gptLink(text){const q=encodeURIComponent(text||'');return q.length&&q.l
 /* ---- AI tự động: Gemini qua server của bạn (Supabase Edge Function "ai") ---- */
 let apiNote='';
 function apiOn(){return !!(STANDALONE&&supa&&acct&&lsGet('vstep-api')!==0&&!(lsGet('vstep-api-off-until')>Date.now()));}
-async function aiApi(prompt){
-  const{data,error}=await supa.functions.invoke('ai',{body:{prompt}});
+async function aiApi(prompt,images){
+  const{data,error}=await supa.functions.invoke('ai',{body:images&&images.length?{prompt,images}:{prompt}});
   if(error){let st=error.context&&error.context.status,b={};try{b=await error.context.json();}catch(e){}
     throw{code:st===429?'quota':st===404?'noapi':st===401?'auth':(b.error||'api'),message:b.detail||b.error||error.message};}
   if(!data||!data.text)throw{code:'empty',message:'AI trả về rỗng'};
@@ -1644,30 +1652,119 @@ async function pdfText(file){
     out+=tc.items.map(it=>{const y=it.transform[5],nl=last!==null&&Math.abs(y-last)>2;last=y;return(nl?'\n':'')+it.str;}).join(' ')+'\n\n';}
   return out;
 }
-$('#b-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const msg=$('#b-msg');msg.innerHTML=spin('Đang đọc file…');
+/* ---------- đọc tài liệu: PDF có chữ, PDF scan, ảnh chụp, txt ---------- */
+const IMG_RE=/\.(jpe?g|png|webp|gif|bmp)$/i;
+function fileToImg(file){return new Promise((res,rej)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>{res(im);};im.onerror=()=>rej({message:`Không mở được ảnh ${file.name}. Ảnh HEIC của iPhone hãy chuyển sang JPG (hoặc chụp màn hình lại).`});im.src=u;});}
+function canvasJpeg(src,w,h){const max=1600,k=Math.min(1,max/Math.max(w,h)),c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);
+  const g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);g.drawImage(src,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.82);}
+async function pdfPages(file,maxPages){
+  if(!window.pdfjsLib)throw{message:'Không tải được trình đọc PDF.'};
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise,out=[];
+  for(let p=1;p<=Math.min(pdf.numPages,maxPages);p++){const pg=await pdf.getPage(p),vp=pg.getViewport({scale:2}),c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
+    await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;out.push(canvasJpeg(c,c.width,c.height));}
+  return{imgs:out,total:pdf.numPages};
+}
+/* OCR trong trình duyệt (miễn phí, không cần AI) — dùng khi không có Gemini tự động */
+async function ocrImages(dataUrls,onp){
+  if(!window.Tesseract){await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';s.onload=res;s.onerror=()=>rej({message:'Không tải được bộ nhận chữ (OCR). Kiểm tra mạng, hoặc bật Gemini tự động.'});document.head.appendChild(s);});}
+  const w=await Tesseract.createWorker('eng');let t='';
+  try{for(let i=0;i<dataUrls.length;i++){onp&&onp(i+1,dataUrls.length);const r=await w.recognize(dataUrls[i]);t+=r.data.text+'\n\n';}}finally{try{await w.terminate();}catch(e){}}
+  return t;
+}
+let upImgs=[];   /* ảnh của tài liệu đang chờ nạp (data URL JPEG) */
+function upInfo(){const n=upImgs.length,box=$('#b-imgs');if(!box)return;
+  box.innerHTML=n?`<div class="thumbs">${upImgs.slice(0,12).map((u,i)=>`<div class="th"><img src="${u}" alt=""><button class="x" data-ix="${i}" title="Bỏ ảnh này">×</button></div>`).join('')}</div><p class="mute" style="margin:4px 0 0">${n} trang ảnh. ${visionOn()?'Gemini sẽ đọc thẳng từ ảnh (chính xác hơn, giữ được bảng và đáp án khoanh).':'Web sẽ tự nhận chữ trong ảnh (OCR) rồi tách đề. Ảnh càng nét, thẳng, đủ sáng thì càng chính xác.'}</p>`:'';
+  box.querySelectorAll('[data-ix]').forEach(b=>b.onclick=()=>{upImgs.splice(+b.dataset.ix,1);upInfo();});}
+function visionOn(){return STANDALONE&&typeof apiOn==='function'&&apiOn();}
+async function readUploads(files){
+  const msg=$('#b-msg');let txt='',added=0;
+  for(const f of files){
+    msg.innerHTML=spin(`Đang đọc ${esc(f.name)}…`);
+    if(IMG_RE.test(f.name)||/^image\//.test(f.type)){const im=await fileToImg(f);upImgs.push(canvasJpeg(im,im.naturalWidth,im.naturalHeight));added++;continue;}
+    if(/\.pdf$/i.test(f.name)||f.type==='application/pdf'){
+      const t=await pdfText(f);
+      if(t.replace(/\s/g,'').length>=50){txt+=(txt?'\n\n':'')+t.trim();continue;}
+      const{imgs,total}=await pdfPages(f,15);upImgs.push(...imgs);added+=imgs.length;
+      if(total>15)msg.insertAdjacentHTML('beforeend',`<div class="note">PDF scan có ${total} trang, chỉ lấy 15 trang đầu. Nên tách nhỏ theo kỹ năng.</div>`);continue;}
+    if(/\.docx$/i.test(f.name))throw{message:'File Word (.docx): hãy mở bằng Word, chọn Lưu thành PDF rồi tải PDF lên, hoặc copy nội dung dán vào ô.'};
+    txt+=(txt?'\n\n':'')+(await f.text()).trim();
+  }
+  upImgs=upImgs.slice(0,20);
+  if(txt)$('#b-text').value=($('#b-text').value.trim()?$('#b-text').value.trim()+'\n\n':'')+txt;
+  upInfo();
+  msg.innerHTML=`<p class="mute">${txt?`Đã đọc ${txt.length.toLocaleString()} ký tự chữ. `:''}${added?`Đã thêm ${added} trang ảnh. `:''}Chọn “Nạp đề có sẵn” hoặc “Tạo đề mới từ tài liệu”.</p>`;
+}
+/* lấy nội dung tài liệu: ảnh → Gemini đọc thẳng (nếu có) hoặc OCR */
+async function materialText(msg){
+  let text=$('#b-text').value.trim();
+  if(upImgs.length&&!visionOn()){
+    const t=await ocrImages(upImgs,(i,n)=>{msg.innerHTML=spin(`Đang nhận chữ trong ảnh ${i}/${n} (OCR)… lần đầu tải bộ nhận chữ hơi lâu`);});
+    if(t.replace(/\s/g,'').length<40)throw{message:'Không nhận được chữ trong ảnh. Chụp lại rõ hơn (thẳng, đủ sáng, không mờ), hoặc bật Gemini tự động để AI đọc ảnh.'};
+    text=(text?text+'\n\n':'')+t.trim();
+  }
+  return text;
+}
+async function askDoc(prompt,text){
+  /* gửi kèm ảnh cho Gemini khi có thể; không thì gửi chữ */
+  if(upImgs.length&&visionOn()){
+    const imgs=upImgs.map(u=>({mime:'image/jpeg',data:u.split(',')[1]}));
+    const t=await aiApi(prompt.replace('%%DOC%%',text?`Text part of the document:\n"""${text}"""\nThe remaining pages are attached as images (in order).`:'The document pages are attached as images (in order). Read them carefully, including circled/ticked answers and answer keys.'),imgs);
+    return parseJSON(t);
+  }
+  return ask(prompt.replace('%%DOC%%',`Document:\n"""${text}"""`),'complex');
+}
+
+$('#b-file').onchange_old=async e=>{const f=e.target.files[0];if(!f)return;const msg=$('#b-msg');msg.innerHTML=spin('Đang đọc file…');
   try{const t=/pdf$/i.test(f.name)||f.type==='application/pdf'?await pdfText(f):await f.text();
     if(t.replace(/\s/g,'').length<50)throw{message:'File gần như không có chữ (có thể là bản scan). Hãy dán nội dung.'};
     $('#b-text').value=t.trim();msg.innerHTML=`<p class="mute">Đã đọc ${t.length.toLocaleString()} ký tự. Kiểm tra nhanh rồi bấm “Nạp đề”.</p>`;}catch(err){msg.innerHTML=`<p class="mute">${errMsg(err)}</p>`}};
+['#b-file','#b-cam'].forEach(id=>$(id).onchange=async e=>{const fs=[...e.target.files];e.target.value='';if(!fs.length)return;try{await readUploads(fs);}catch(err){$('#b-msg').innerHTML=`<p class="mute">${errMsg(err)}</p>`;}});
 $('#b-import').onclick=async()=>{
-  await ready;let text=$('#b-text').value.trim();const msg=$('#b-msg');
-  if(text.length<100){msg.innerHTML='<p class="mute">Nội dung đề quá ngắn.</p>';return}
+  await ready;const msg=$('#b-msg');let text;
+  try{text=await materialText(msg);}catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`;return;}
+  if(text.length<100&&!(upImgs.length&&visionOn())){msg.innerHTML='<p class="mute">Nội dung đề quá ngắn. Tải file, chụp ảnh hoặc dán đề vào ô.</p>';return}
   msg.innerHTML='';if(text.length>28000){msg.innerHTML='<div class="note">Đề dài quá, chỉ lấy 28.000 ký tự đầu. Nên nạp từng kỹ năng.</div>';text=text.slice(0,28000);}
   $('#b-import').disabled=true;msg.insertAdjacentHTML('beforeend',spin('AI đang tách câu hỏi… (1–2 phút với đề dài)'));
   const type=$('#b-type').value,solve=$('#b-solve').checked;
   try{
-    const d=await ask(`The user pasted an English exam (${type}) from their own copy for personal practice. Convert it into JSON WITHOUT changing the wording of passages, questions or options (fix only PDF line-break artifacts).
+    const d=await askDoc(`The user provided an English exam (${type}) from their own copy for personal practice. Convert it into JSON WITHOUT changing the wording of passages, questions or options (fix only PDF line-break artifacts).
 - Split into sections by skill: "reading","listening","writing","speaking". Listening: questions/options only; transcript in "passage" only if the document contains it.
 - Map any answer key to "answer" (0-3). Without a key: ${solve?'solve it and set "ai_answer": true (listening without transcript: answer null)':'answer null'}.
 - Writing/speaking tasks go in "prompt" with no questions. Skip cover pages, boilerplate, answer sheets.
+- If text came from OCR or photos, silently fix obvious recognition errors (broken words, stray symbols) but keep the original wording.
 Return ONLY JSON: {"title":string,"sections":[{"skill":string,"title":string,"instructions":string,"passage":string,"prompt":string,"questions":[{"q":string,"options":[strings],"answer":number|null,"ai_answer":boolean,"explain_vi":string}]}]}
-Document:\n"""${text}"""`,'complex');
+%%DOC%%`,text);
     const secs=(d.sections||[]).filter(s=>(s.questions&&s.questions.length)||s.prompt);if(!secs.length)throw{message:'Không tìm thấy câu hỏi nào.'};
     const id=Date.now().toString(36),nq=secs.reduce((a,s)=>a+(s.questions||[]).length,0);
     await putDoc('exam_'+id,{type,title:d.title,sections:secs});
     state.exams.unshift({id,type,title:d.title||'Đề đã nạp',n:nq,skills:[...new Set(secs.map(s=>s.skill))],t:Date.now()});save();autoShare('exam',id);
-    msg.innerHTML=`<p class="mute">Đã nạp “${esc(d.title||'')}” – ${nq} câu trắc nghiệm.</p>`;$('#b-text').value='';renderBank();
+    msg.innerHTML=`<p class="mute">Đã nạp “${esc(d.title||'')}” – ${nq} câu trắc nghiệm.</p>`;$('#b-text').value='';upImgs=[];upInfo();renderBank();
   }catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`}
   $('#b-import').disabled=false;
+};
+$('#b-make').onclick=async()=>{
+  await ready;const msg=$('#b-msg'),b=$('#b-make');let text;
+  try{text=await materialText(msg);}catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`;return;}
+  if(text.length<60&&!(upImgs.length&&visionOn())){msg.innerHTML='<p class="mute">Tài liệu quá ngắn. Tải file, chụp ảnh hoặc dán nội dung vào ô.</p>';return}
+  if(text.length>24000)text=text.slice(0,24000);
+  const kind=$('#b-mkkind').value,n=+$('#b-mkn').value,lv=$('#b-mklv').value;b.disabled=true;msg.innerHTML=spin('AI đang ra đề từ tài liệu của bạn…');
+  const K={auto:'Choose the best fit: if there is a reading text, write reading-comprehension questions on it; if it is a word list or vocabulary page, write vocabulary questions; if it explains grammar, write grammar questions; otherwise a mix.',
+    reading:'Reading comprehension questions on the passage(s) in the material (main idea, detail, vocabulary in context, reference, inference). Keep the passage text exactly as in the material.',
+    vocab:'Vocabulary questions using ONLY words/phrases that appear in the material: meaning, use in a new sentence, collocation, word form, synonym/antonym.',
+    grammar:'Grammar questions practising ONLY the grammar points taught or used in the material, with new example sentences.',
+    mixed:'A mixed test: reading questions on any passage, plus vocabulary and grammar questions drawn from the material.'};
+  try{const d=await askDoc(`You are an English teacher preparing a practice test for a Vietnamese learner (target CEFR ${lv}) from THEIR OWN study material (textbook page, notes, worksheet, article). ${K[kind]}
+Write ${n} multiple-choice questions (4 options, exactly one correct, spread answer positions), each with a short Vietnamese "explain_vi" and "why_vi" (one note per option). Questions must be answerable from the material or test what it teaches. If the material contains a reading text, put it in "text" (clean OCR errors, keep wording); otherwise "text" = a short Vietnamese summary of what the test covers.
+Return ONLY JSON: {"title":string,"skill":"reading|vocab|grammar|mixed","text":string,"questions":[{"q":string,"options":[4 strings],"answer":0-3,"qtype":string,"explain_vi":string,"why_vi":[4 strings]}]}
+%%DOC%%`,text);
+    const qs=(d.questions||[]).filter(q=>q&&Array.isArray(q.options)&&q.options.length===4&&q.answer>=0&&q.answer<=3);if(!qs.length)throw{message:'AI không tạo được câu hỏi từ tài liệu này.'};
+    const isR=d.skill==='reading'||kind==='reading';
+    const g={score:isR?'VSTEP Đọc':'quick',label:`Từ tài liệu: ${d.title||'Bài luyện'}`,minutes:Math.max(5,Math.ceil(qs.length*(isR?1.5:0.8))),parts:[{title:d.title||'Bài luyện',short:'Bài 1',text:d.text||'',qtitle:d.title||'',questions:qs}]};
+    const id=await saveGen(g);msg.innerHTML=`<p class="mute">Đã tạo đề “${esc(d.title||'')}” – ${qs.length} câu, lưu ở mục Đề AI đã tạo.</p><button class="btn sm" id="b-mkgo">Làm ngay</button>`;
+    $('#b-mkgo').onclick=()=>openGen(id);renderBank();
+  }catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`}
+  b.disabled=false;
 };
 const SK={reading:'Reading',listening:'Listening',writing:'Writing',speaking:'Speaking'};const SKC={reading:'read',listening:'listen',writing:'write',speaking:'speak'};
 let genF='';
