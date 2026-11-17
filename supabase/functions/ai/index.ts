@@ -17,8 +17,10 @@ Deno.serve(async (req) => {
   // Chỉ người đã đăng nhập web mới được dùng
   const auth = req.headers.get("Authorization") || "";
   const apikey = req.headers.get("apikey") || Deno.env.get("SUPABASE_ANON_KEY") || "";
-  const who = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, { headers: { Authorization: auth, apikey } });
-  if (!who.ok) return json({ error: "auth" }, 401);
+  const t0 = Date.now();
+  const who = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, { headers: { Authorization: auth, apikey }, signal: AbortSignal.timeout(10000) }).catch(() => null);
+  console.log("auth", who?.status, Date.now() - t0, "ms");
+  if (!who || !who.ok) return json({ error: "auth" }, 401);
 
   const key = Deno.env.get("GEMINI_API_KEY");
   if (!key) return json({ error: "nokey" }, 500);
@@ -35,26 +37,42 @@ Deno.serve(async (req) => {
 
   const models = (Deno.env.get("GEMINI_MODELS") || DEFAULT_MODELS).split(",").map((s) => s.trim()).filter(Boolean);
   let last = "quota";
-  for (const m of models) {
-    let r: Response;
+  // Gọi 1 model; thinking "low" cho nhanh (không hỗ trợ thì gọi lại không có thinkingConfig)
+  const call = async (m: string, think: boolean) => {
+    const t1 = Date.now();
+    const gen: Record<string, unknown> = { temperature: 0.8, maxOutputTokens: 32768 };
+    if (think) gen.thinkingConfig = { thinkingLevel: "low" };
     try {
-      r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts }],
-          generationConfig: { temperature: 0.8, maxOutputTokens: 32768 },
-        }),
+        body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: gen }),
+        signal: AbortSignal.timeout(Math.max(10000, 125000 - (Date.now() - t0))),
       });
-    } catch { last = "network"; continue; }
-    if (r.status === 429 || r.status === 503 || r.status === 500) { last = "quota"; continue; }
-    if (r.status === 404) { last = "model"; continue; }
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) return json({ error: "gemini", detail: d?.error?.message || String(r.status) }, 502);
-    const c = d.candidates?.[0];
-    const text = (c?.content?.parts || []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text || "").join("");
-    if (!text) { last = "empty"; continue; }
-    return json({ text, model: m, finish: c?.finishReason || "" });
+      console.log("gemini", m, think ? "low" : "default", r.status, Date.now() - t1, "ms");
+      return r;
+    } catch (e) { console.log("gemini", m, "error", String(e), Date.now() - t1, "ms"); return null; }
+  };
+  for (const m of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (Date.now() - t0 > 110000) { last = "timeout"; break; }
+      let r = await call(m, true);
+      if (r && r.status === 400) {
+        const t = await r.clone().text();
+        if (/thinking/i.test(t)) r = await call(m, false);
+      }
+      if (!r) { last = "network"; break; }
+      if (r.status === 503 || r.status === 500) { last = "quota"; if (attempt === 0) { await new Promise((z) => setTimeout(z, 1500)); continue; } break; }
+      if (r.status === 429) { last = "quota"; break; }
+      if (r.status === 404) { last = "model"; break; }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return json({ error: "gemini", detail: d?.error?.message || String(r.status) }, 502);
+      const c = d.candidates?.[0];
+      const text = (c?.content?.parts || []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text || "").join("");
+      if (!text) { last = "empty"; break; }
+      return json({ text, model: m, finish: c?.finishReason || "" });
+    }
+    if (last === "timeout") break;
   }
-  return json({ error: last }, last === "quota" ? 429 : 502);
+  return json({ error: last }, last === "quota" ? 429 : last === "timeout" ? 504 : 502);
 });
