@@ -478,7 +478,8 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     </div>
     <div class="sec" id="mats">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">Tài liệu của tôi</h2><div class="row" id="mat-tools"></div></div>
-      <p>Bài giảng, tài liệu hướng dẫn, mẹo làm bài, dàn ý mẫu của thầy cô… đã được AI tóm thành bài học. Mở ra để đọc lại, lưu từ vựng để ôn, tạo đề luyện, hoặc dùng làm tiêu chí khi chấm Viết, Nói.</p>
+      <p>Bài giảng, tài liệu hướng dẫn, mẹo làm bài, dàn ý mẫu của thầy cô… đã được AI tóm thành bài học. Tài liệu đánh dấu ★ là chuẩn cho cả web.</p>
+      <div class="panel" id="std-box" style="margin:8px 0 14px"></div>
       <div class="grid" id="mat-list"></div>
     </div>
     <div class="sec">
@@ -1141,7 +1142,7 @@ const VSTEP_TOPICS=['education and studying abroad','work, jobs and careers','te
 const pickTopic=()=>VSTEP_TOPICS[Math.floor(Math.random()*VSTEP_TOPICS.length)];
 async function styleRef(skill){
   /* lấy một đoạn trong đề THẬT đã nạp ở Kho đề làm khuôn văn phong và kiểu câu hỏi */
-  try{const ex=(state.exams||[]).filter(e=>(e.skills||[]).includes(skill));if(!ex.length)return '';
+  try{if(!stdOn())return '';const ex=(state.exams||[]).filter(e=>(e.skills||[]).includes(skill));if(!ex.length)return '';
     const e=ex[Math.floor(Math.random()*ex.length)],d=await getDoc('exam_'+e.id);const sec=(d&&d.sections||[]).filter(x=>x.skill===skill&&(x.questions||[]).length);if(!sec.length)return '';
     const x=sec[Math.floor(Math.random()*sec.length)],qs=x.questions.slice(0,4).map(q=>'- '+q.q+(q.options?' | '+q.options.join(' / '):'')).join('\n');
     return `\nSTYLE MODEL — an excerpt from a REAL exam the learner is preparing for. Match its length, register, difficulty, question wording and distractor style closely, but write completely new content (do NOT reuse its topic, sentences or questions):\n"""${String(x.passage||x.text||'').slice(0,1400)}"""\nSample questions:\n${qs}\n`;}catch(e){return '';}
@@ -1158,7 +1159,7 @@ Return ONLY JSON: {"questions":[same structure, same count],"fixed":number of qu
   return d;
 }
 async function genReading(lv,words,nq,hint){
-  const sref=/^A/.test(lv)?'':await styleRef('reading');
+  const sref=(/^A/.test(lv)?'':await styleRef('reading'))+await stdBlock('reading',true);
   const d=await genReading0(lv,words,nq,hint,sref);return verifySet(d,'read');
 }
 async function genReading0(lv,words,nq,hint,sref){
@@ -1171,6 +1172,12 @@ async function openRead(n,o){
   o=o||{};const LV=o.lv||LVL;
   await ready;const body=openRoom(n===4?'Reading – đề đầy đủ (40 câu, 60 phút)':`Reading – 1 bài (${LV})`);
   try{
+    if(n===1&&!o.ai){const r=await realSection('reading');if(r){state.usedSec[r.key]=Date.now();save();
+      const qs=r.sec.questions.filter(q=>q.options&&q.options.length).map(q=>({...cleanQ(q),answer:q.answer==null?null:+q.answer}));
+      const part={title:cleanText(r.sec.title)||'Reading',short:'Đề thật',text:cleanText(r.sec.passage),questions:qs};if(r.sec.instructions)part.instr=cleanText(r.sec.instructions);
+      body.innerHTML='';const note=document.createElement('div');note.className='note';note.style.margin='0 0 8px';note.innerHTML=`Bài trong đề thật “${esc(r.e.title)}” (chưa làm). <a href="#" id="r-ai">Muốn AI tạo bài mới thì bấm đây</a>.`;
+      mcqRoom(body,[part],{minutes:Math.max(8,Math.ceil(qs.length*1.5)),onDone:(c,t)=>{addHist('Kho đề',`${c}/${t}`,'Đề thật: '+r.e.title);return `<div class="row"><span class="big">${c}/${t}</span><span class="lvlpill">${Math.round(c/t*100)}% đúng</span></div>`;}});
+      body.prepend(note);$('#r-ai').onclick=e=>{e.preventDefault();closeRoom();openRead(1,Object.assign({},o,{ai:1}));};return;}}
     const parts=[];
     for(let i=0;i<n;i++){body.innerHTML=spin(`Đang soạn bài đọc ${i+1}/${n}…`);
       const lv=n===4?RLV[i]:LV;const d=await genReading(lv,n===4?[400,450,500,500][i]:RWORDS[lv],o.nq||10,n===4&&i===3?'more literary or specialised':(o.hint||''));
@@ -1186,7 +1193,7 @@ const LSPEC={
   v3:{t:'Part 3 – Bài giảng',n:15,p:`VSTEP Listening Part 3: 3 separate talks/lectures (~300 words each) by speaker N on academic topics. 5 questions per talk (15 total): main idea, details, speaker's attitude, inference. Insert {"speaker":"N","text":"Talk 2."} before talks 2 and 3.`}
 };
 async function genListen(part,lv){
-  const s=LSPEC[part],sref=await styleRef('listening');
+  const s=LSPEC[part],sref=await styleRef('listening')+await stdBlock('listening',true);
   const d=await ask(`Create ORIGINAL English listening practice at CEFR ${lv} (seed ${seed()}; topic area: ${pickTopic()}). ${s.p}${sref}
 Questions must be answerable only from the audio; spread answer positions. Tag each question with "qtype": one of main, detail, inference, purpose, attitude, number.
 Return ONLY JSON: {"title":string,"lines":[{"speaker":"A"|"B"|"N","text":string}],"translation_vi":"bản dịch tiếng Việt của toàn bộ transcript","questions":[{"q":string,"options":[4],"answer":0-3,"explain_vi":"giải thích ngắn tiếng Việt, trích từ khoá nghe được","why_vi":["A: vì sao đúng/sai","B: …","C: …","D: …"]}]}`);
@@ -1272,7 +1279,7 @@ async function openWrite(card,givenPrompt){
       t67:'TOEIC Writing Q6-7: an incoming business email (60-90 words) then a direction like "Respond to the email. In your email, ask TWO questions and make ONE suggestion."',
       t8:'TOEIC Writing Q8 opinion essay about work/business life. End with "Give reasons or examples to support your opinion. Write at least 300 words."'}[task];
       body.innerHTML=spin((state.pool['w:'+(card.id||task)]||[]).length?'Đang lấy đề…':'Đang soạn 5 đề (lần sau lấy ngay, không gọi AI)…');
-      prompt=await takePrompt('w:'+(card.id||task),spec);}
+      prompt=await takePrompt('w:'+(card.id||task),spec,await stdBlock('write'));}
   }catch(e){body.innerHTML=`<div class="pane">${errMsg(e)}</div>`;return}
   body.innerHTML=`<div class="rtabs"><button class="on" data-p="l">Đề bài</button><button data-p="r">Bài làm</button></div>
   <div class="rmain"><div class="pane l" id="pl"><h4 style="margin-top:0">Đề bài</h4><div class="ptext">${esc(prompt)}</div>
@@ -1482,7 +1489,7 @@ async function openSpeak(card,givenPrompt){
       v3:'VSTEP Speaking Part 3 (Topic development): a topic statement with a mind-map of 3 suggested ideas (candidate may add own), then 3 follow-up questions.',
       t11:'TOEIC Speaking Q11 (Express an opinion): one workplace/daily-life opinion question.'}[card.part];
       body.innerHTML=spin((state.pool['s:'+(card.id||card.part)]||[]).length?'Đang lấy đề…':'Đang soạn 5 đề (lần sau lấy ngay, không gọi AI)…');
-      prompt=await takePrompt('s:'+(card.id||card.part),spec,'Each prompt is plain text with line breaks.');}
+      prompt=await takePrompt('s:'+(card.id||card.part),spec,'Each prompt is plain text with line breaks.'+await stdBlock('speak'));}
   }catch(e){body.innerHTML=`<div class="pane">${errMsg(e)}</div>`;return}
   body.innerHTML=`<div class="rtabs"><button class="on" data-p="l">Đề bài</button><button data-p="r">Trả lời</button></div>
   <div class="rmain"><div class="pane l" id="pl"><h4 style="margin-top:0">Đề bài</h4><div class="ptext">${esc(prompt)}</div><div style="margin-top:16px">${tplFor(card).map(t=>tplHTML(t)).join('')}</div></div>
@@ -1871,6 +1878,40 @@ Return ONLY JSON: {"title":string,"sections":[{"skill":string,"title":string,"in
   }catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`}
   $('#b-import').disabled=false;
 };
+/* =================== CHUẨN CỦA WEB: tài liệu + đề thật đã nạp làm khuôn cho mọi bài AI tạo =================== */
+const STD_SK={reading:['reading'],listening:['listening'],write:['writing'],speak:['speaking'],grammar:['grammar'],vocab:['vocab']};
+function stdOn(){return state.stdOn!==false;}
+function stdMats(skill){if(!stdOn())return [];const ks=STD_SK[skill];return matsAll().filter(m=>m.std!==false&&(!ks||ks.includes(m.kind)||m.kind==='tips'||m.kind==='other'));}
+const _matC={};async function matDoc(id){if(!_matC[id])_matC[id]=await getDoc('mat_'+id);return _matC[id];}
+function stdChanged(){state.pool={};for(const k in _matC)delete _matC[k];if(typeof _guideCache!=='undefined')for(const k in _guideCache)delete _guideCache[k];save();}
+async function stdBlock(skill,withSrc){
+  try{const ms=stdMats(skill);if(!ms.length)return '';const ks=STD_SK[skill]||[];
+    const pick=[...shuffle(ms.filter(m=>ks.includes(m.kind))),...shuffle(ms.filter(m=>!ks.includes(m.kind)))].slice(0,3);
+    let out='';for(const m of pick){const d=await matDoc(m.id);if(!d)continue;
+      const core=[(d.points||[]).map(p=>p.h+': '+p.body).join(' | '),(d.templates||[]).length?'Templates: '+d.templates.join(' | '):'',(d.checklist_vi||[]).length?'Checklist: '+d.checklist_vi.join(' | '):''].filter(Boolean).join('\n').slice(0,1400);
+      out+=`\n### ${d.title} (${MAT_KIND[d.kind]||d.kind}${d.level?', '+d.level:''})\n${core}`;
+      if(withSrc&&d.source){const s=String(d.source),st=Math.floor(Math.random()*Math.max(1,s.length-900));out+=`\nExcerpt: """${s.slice(st,st+900)}"""`;}}
+    return out?`\nLEARNER'S OWN STUDY MATERIALS — treat them as the STANDARD for this app. Follow their exam format, question types, level, topics, terminology, rules and templates closely, and practise exactly what they teach. Write NEW content (never copy their passages or questions verbatim):${out}\n`:'';}catch(e){return '';}
+}
+async function stdWords(){const out=[];for(const m of stdMats('vocab')){const d=await matDoc(m.id);if(d&&d.vocab)out.push(...d.vocab.map(v=>v.w));}return [...new Set(out)];}
+/* lấy một bài trong đề thật đã nạp mà chưa làm */
+async function realSection(skill){
+  if(!stdOn()||state.realFirst===false)return null;state.usedSec=state.usedSec||{};
+  for(const e of shuffle(state.exams||[]).filter(e=>(e.skills||[]).includes(skill))){const d=await getDoc('exam_'+e.id);
+    const secs=(d&&d.sections||[]).map((s,i)=>({s,i})).filter(x=>x.s.skill===skill&&(x.s.questions||[]).length&&x.s.passage&&!state.usedSec[e.id+':'+x.i]);
+    if(secs.length)return {e,sec:secs[0].s,key:e.id+':'+secs[0].i};}
+  return null;
+}
+function stdStats(){const ms=matsAll(),on=ms.filter(m=>m.std!==false).length,ex=(state.exams||[]).length;
+  let left=0;state.usedSec=state.usedSec||{};return {on,all:ms.length,ex};}
+function renderStd(){
+  const box=$('#std-box');if(!box)return;const s=stdStats();
+  box.innerHTML=`<label style="display:block"><input type="checkbox" id="std-on" ${stdOn()?'checked':''}> <b>Dùng tài liệu và đề đã nạp làm chuẩn cho cả web</b></label>
+    <p class="mute" style="margin:4px 0 6px 24px">Mọi bài AI tạo ở Luyện đề, Đọc, Nghe, Viết, Nói, Ngữ pháp, Từ vựng và lộ trình đều bám theo ${s.on} tài liệu đánh dấu ★ và ${s.ex} đề thật đã nạp: đúng dạng đề, dạng câu hỏi, chủ đề, mẹo và khung câu trong đó. Bài Viết, Nói được chấm có đối chiếu hướng dẫn của tài liệu.</p>
+    <label style="display:block;margin-left:24px"><input type="checkbox" id="std-real" ${state.realFirst!==false?'checked':''} ${stdOn()?'':'disabled'}> Luyện Đọc 1 bài: ưu tiên lấy bài trong đề thật đã nạp mà bạn chưa làm, hết mới để AI tạo</label>`;
+  $('#std-on').onchange=e=>{state.stdOn=e.target.checked;stdChanged();renderStd();};
+  $('#std-real').onchange=e=>{state.realFirst=e.target.checked;save();};
+}
 /* =================== TÀI LIỆU CỦA TÔI: lưu tài liệu thành bài học =================== */
 const MAT_KIND={grammar:'Ngữ pháp',reading:'Đọc',listening:'Nghe',writing:'Viết',speaking:'Nói',vocab:'Từ vựng',tips:'Mẹo làm bài',other:'Khác'};
 function matsAll(){state.mats=Array.isArray(state.mats)?state.mats:[];return state.mats;}
@@ -1887,10 +1928,11 @@ Return ONLY JSON: {"title":"tên bài ngắn (tiếng Việt)","kind":"grammar|r
     const id='m'+Date.now().toString(36);
     const doc={title:d.title||'Tài liệu',kind:MAT_KIND[d.kind]?d.kind:'other',level:d.level||'',summary_vi:d.summary_vi||'',points:d.points||[],templates:d.templates||[],vocab:(d.vocab||[]).filter(v=>v&&v.w),checklist_vi:d.checklist_vi||[],source:cleanText(String(d.source_text||text||'')).slice(0,40000)};
     await putDoc('mat_'+id,doc);
-    matsAll().unshift({id,title:doc.title,kind:doc.kind,level:doc.level,nv:doc.vocab.length,np:doc.points.length,grade:doc.kind==='writing'||doc.kind==='speaking',t:Date.now()});save();
+    matsAll().unshift({id,title:doc.title,kind:doc.kind,level:doc.level,nv:doc.vocab.length,np:doc.points.length,grade:doc.kind==='writing'||doc.kind==='speaking',std:true,t:Date.now()});stdChanged();
+    if(doc.vocab.length>=5){const did=Date.now().toString(36)+'v';await putDoc('deck_'+did,{cards:doc.vocab.map(v=>({w:v.w,vi:v.vi||'',ex:v.ex||'',pos:'',ipa:'',def:'',col:[]}))});state.decks.unshift({id:did,lvl:doc.level||'B1',cat:'topic',topic:'Từ tài liệu: '+doc.title,n:doc.vocab.length,t:Date.now()});save();}
     if(grp&&state.autoShare!==false)shareMat(id).catch(()=>{});
     $('#b-text').value='';upImgs=[];upInfo();renderMats();
-    msg.innerHTML=`<p class="mute">Đã lưu “${esc(doc.title)}” vào Tài liệu của tôi.</p><button class="btn sm" id="b-mopen">Mở bài học</button>`;$('#b-mopen').onclick=()=>openMat(id);
+    msg.innerHTML=`<p class="mute">Đã lưu “${esc(doc.title)}” vào Tài liệu của tôi${stdOn()?', từ giờ các bài AI tạo sẽ bám theo tài liệu này':''}${doc.vocab.length>=5?'. Từ vựng đã vào tab Từ vựng để ôn':''}.</p><button class="btn sm" id="b-mopen">Mở bài học</button>`;$('#b-mopen').onclick=()=>openMat(id);
   }catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`}
   b.disabled=false;
 }
@@ -1900,15 +1942,17 @@ async function shareMat(id){if(!grp)return;const m=matsAll().find(x=>x.id===id),
 function renderMats(){
   const box=$('#mat-list');if(!box)return;const ms=matsAll();
   $('#mat-tools').innerHTML=grp?'<button class="btn sm ghost" id="mat-get">Lấy tài liệu của nhóm</button><span class="mute" id="mat-gm"></span>':'';
-  box.innerHTML=ms.length?ms.map(m=>`<div class="tcard" style="--sk:var(--c-${{reading:'read',listening:'listen',writing:'write',speaking:'speak'}[m.kind]||'mix'})"><div class="thumb">${IC[{reading:'read',listening:'listen',writing:'write',speaking:'speak'}[m.kind]]||IC.mix}<span class="lab">${esc(MAT_KIND[m.kind]||'')}</span></div><div class="body"><h3>${esc(m.title)}</h3><p>${m.np||0} ý chính · ${m.nv||0} từ${m.level?' · '+esc(m.level):''}${m.grade?' · dùng khi chấm':''}${m.by?' · của '+esc(m.by):''}</p>
-    <div class="row"><button class="btn sm" data-mo="${m.id}">Mở</button><button class="btn sm ghost" data-mx="${m.id}">Xoá</button></div></div></div>`).join('')
+  box.innerHTML=ms.length?ms.map(m=>`<div class="tcard" style="--sk:var(--c-${{reading:'read',listening:'listen',writing:'write',speaking:'speak'}[m.kind]||'mix'})"><div class="thumb">${IC[{reading:'read',listening:'listen',writing:'write',speaking:'speak'}[m.kind]]||IC.mix}<span class="lab">${esc(MAT_KIND[m.kind]||'')}</span></div><div class="body"><h3>${esc(m.title)}</h3><p>${m.np||0} ý chính · ${m.nv||0} từ${m.level?' · '+esc(m.level):''}${m.std!==false?' · <b>★ chuẩn</b>':''}${m.by?' · của '+esc(m.by):''}</p>
+    <div class="row"><button class="btn sm" data-mo="${m.id}">Mở</button><button class="btn sm ghost" data-ms="${m.id}" title="Dùng làm chuẩn cho cả web">${m.std!==false?'Bỏ chuẩn':'★ Làm chuẩn'}</button><button class="btn sm ghost" data-mx="${m.id}">Xoá</button></div></div></div>`).join('')
     :'<p class="mute">Chưa có tài liệu. Tải file hoặc ảnh ở mục “Nạp đề” bên dưới rồi bấm <b>Lưu thành tài liệu</b>.</p>';
   box.querySelectorAll('[data-mo]').forEach(b=>b.onclick=()=>openMat(b.dataset.mo));
-  box.querySelectorAll('[data-mx]').forEach(b=>b.onclick=()=>confirmBox('Xoá tài liệu này?','Xoá',async()=>{state.mats=ms.filter(x=>x.id!==b.dataset.mx);save();await delDoc('mat_'+b.dataset.mx);renderMats();}));
+  box.querySelectorAll('[data-ms]').forEach(b=>b.onclick=()=>{const m=ms.find(x=>x.id===b.dataset.ms);m.std=m.std===false;stdChanged();renderMats();});
+  renderStd();
+  box.querySelectorAll('[data-mx]').forEach(b=>b.onclick=()=>confirmBox('Xoá tài liệu này?','Xoá',async()=>{state.mats=ms.filter(x=>x.id!==b.dataset.mx);save();await delDoc('mat_'+b.dataset.mx);stdChanged();renderMats();}));
   const g=$('#mat-get');if(g)g.onclick=async()=>{g.disabled=true;try{const{data,error}=await supa.from('shared').select('id,meta,data,created_by').eq('group_id',grp.id).eq('kind','mat');if(error)throw error;
     let n=0;for(const r of data||[]){if(r.created_by===uid)continue;const oid=r.id.slice(4);if(ms.some(x=>x.id===oid||x.from===r.id))continue;
       await putDoc('mat_'+oid,r.data);ms.unshift(Object.assign({},r.meta,{id:oid,from:r.id,t:Date.now()}));n++;}
-    save();renderMats();$('#mat-gm').textContent=`Đã lấy ${n} tài liệu mới.`;}catch(e){$('#mat-gm').textContent=errMsg(e).replace(/<[^>]+>/g,'');g.disabled=false;}};
+    stdChanged();renderMats();$('#mat-gm').textContent=`Đã lấy ${n} tài liệu mới.`;}catch(e){$('#mat-gm').textContent=errMsg(e).replace(/<[^>]+>/g,'');g.disabled=false;}};
 }
 async function openMat(id){
   const m=matsAll().find(x=>x.id===id),body=openRoom(m?m.title:'Tài liệu');const d=await getDoc('mat_'+id);
@@ -1924,9 +1968,11 @@ async function openMat(id){
     <div class="panel" style="margin-top:16px">
       <div class="row"><b>Luyện từ tài liệu này:</b><select id="mt-kind"><option value="auto">AI tự chọn dạng bài</option><option value="grammar">Ngữ pháp</option><option value="vocab">Từ vựng</option><option value="reading">Đọc hiểu</option><option value="mixed">Tổng hợp</option></select><select id="mt-n"><option>10</option><option selected>20</option><option>30</option></select><button class="btn" id="mt-make">Tạo đề luyện</button></div>
       ${d.kind==='writing'||d.kind==='speaking'||m&&m.grade?`<label class="mute" style="display:block;margin-top:8px"><input type="checkbox" id="mt-grade" ${m&&m.grade?'checked':''}> Dùng tài liệu này làm tiêu chí khi AI chấm bài ${d.kind==='speaking'?'Nói':'Viết'} (AI nhận xét bài có làm đúng hướng dẫn không)</label>`:''}
+      ${m?`<label class="mute" style="display:block;margin-top:8px"><input type="checkbox" id="mt-std" ${m.std!==false?'checked':''}> ★ Dùng tài liệu này làm chuẩn cho cả web (đề, bài tập, chấm bài bám theo nó)</label>`:''}
       ${grp&&m&&!m.from?`<div class="row" style="margin-top:8px"><button class="btn sm ghost" id="mt-share">${m.shared?'Đã chia sẻ nhóm ✓':'Chia sẻ cho nhóm'}</button></div>`:''}
       <div id="mt-msg"></div></div></div>`;
   const gr=$('#mt-grade');if(gr)gr.onchange=e=>{m.grade=e.target.checked;save();};
+  const st=$('#mt-std');if(st)st.onchange=e=>{m.std=e.target.checked;stdChanged();renderMats();};
   const sh=$('#mt-share');if(sh)sh.onclick=async()=>{sh.disabled=true;try{await shareMat(id);sh.textContent='Đã chia sẻ nhóm ✓';}catch(e){sh.disabled=false;sh.textContent='Lỗi, thử lại';}};
   const dk=$('#mt-deck');if(dk)dk.onclick=async()=>{dk.disabled=true;const cards=d.vocab.map(v=>({w:v.w,vi:v.vi||'',ex:v.ex||'',pos:'',ipa:'',def:'',col:[]}));const did=Date.now().toString(36);
     await putDoc('deck_'+did,{cards});state.decks.unshift({id:did,lvl:d.level||'B1',cat:'topic',topic:'Từ tài liệu: '+d.title,n:cards.length,t:Date.now()});save();$('#mt-dm').textContent=`Đã lưu ${cards.length} từ vào tab Từ vựng.`;};
@@ -1951,7 +1997,7 @@ Material:\n"""${String(text).slice(0,24000)}"""`);
 /* hướng dẫn của thầy cô/tài liệu dùng khi chấm Viết, Nói */
 let _guideCache={};
 async function guideBlock(skill){
-  const ms=matsAll().filter(m=>m.grade&&m.kind===(skill==='write'?'writing':'speaking'));if(!ms.length)return '';
+  const ms=matsAll().filter(m=>(m.grade||stdOn()&&m.std!==false)&&m.kind===(skill==='write'?'writing':'speaking'));if(!ms.length)return '';
   let out='';for(const m of ms.slice(0,3)){let d=_guideCache[m.id];if(!d){d=await getDoc('mat_'+m.id);_guideCache[m.id]=d;}if(!d)continue;
     out+=`\n- ${d.title}: `+[(d.points||[]).map(p=>p.h+': '+p.body).join(' | '),(d.templates||[]).join(' | '),(d.checklist_vi||[]).join(' | ')].filter(Boolean).join(' || ').slice(0,1500);}
   return out?`\nLEARNER'S STUDY GUIDELINES (from their teacher/materials). Do not change the scoring scale because of them, but in "improve_vi" and "strengths_vi" say concretely which of these guidelines the response follows or misses:${out}\n`:'';
@@ -2554,12 +2600,13 @@ Return ONLY JSON: {"items":[{"rel":[{"w":string,"type":"đồng nghĩa|trái ngh
 }
 async function genDeck(lvl,cat,topic,n){
   let known=[];for(const d of state.decks.filter(d=>d.lvl===lvl&&d.cat===cat)){const doc=await getDoc('deck_'+d.id);if(doc)known.push(...doc.cards.map(c=>c.w));}
+  const mw=(await stdWords()).filter(w=>!known.includes(w)).slice(0,120);
   const cs={topic:`topic vocabulary (words and short compounds) for "${topic}"`,phrasal:`phrasal verbs ${topic.startsWith('mixed')?'(mixed)':'with "'+topic+'"'} — one item per phrasal verb + meaning`,
     colloc:`collocations / fixed phrases / verb patterns in the group "${topic}" — each item a full chunk`,idiom:`idioms and fixed expressions about "${topic}" used in modern English`,
     wordform:`word-formation items for "${topic}": "w" is the base word, "fam" lists the family with parts of speech (e.g. "decide (v) – decision (n) – decisive (adj) ≠ indecisive – decisively (adv)")`}[cat];
   const d=await ask(`You are an English lexicographer building study lists for a Vietnamese university student preparing for VSTEP then TOEIC.
 Create ${n} items of ${cs}, genuinely at CEFR ${lvl} (use your knowledge of the English Vocabulary Profile; no easier items). Prefer items useful in exams and daily life.
-${known.length?'Do NOT repeat: '+known.slice(-300).join(', ')+'.':''}
+${mw.length?'The learner\'s own study materials contain these words; include those that fit this level and list first: '+mw.join(', ')+'.\n':''}${known.length?'Do NOT repeat: '+known.slice(-300).join(', ')+'.':''}
 Return ONLY JSON: {"cards":[{"w":string,"pos":string,"ipa":"/British IPA/","vi":"nghĩa tiếng Việt ngắn","def":"short English definition","ex":"natural example sentence containing the item","ex_vi":"bản dịch tiếng Việt tự nhiên của câu ví dụ","col":["2-3 collocations"],"fam":"word family (required for word formation)","rel":[{"w":"related word","type":"đồng nghĩa|trái nghĩa|cùng họ|liên quan","vi":"nghĩa tiếng Việt"}] (2-4 items)}]}`);
   const cards=(d.cards||[]).filter(c=>c&&c.w);if(!cards.length)throw{message:'AI không trả về từ nào.'};
   const id=Date.now().toString(36);await putDoc('deck_'+id,{cards});
@@ -2625,7 +2672,7 @@ async function openGram(id){
     $('#g-done').onclick=()=>mark();
     const more=async(silent)=>{const btn=$('#g-more');btn.disabled=true;$('#g-msg').innerHTML=spin('Đang soạn thêm 20 câu bài tập…');
       try{const have=(L.exercises||[]).map(x=>x.q).slice(-60).join(' | ').slice(0,3000);
-        const d=await ask(`Write 20 NEW grammar exercises for Vietnamese learners on "${title}" (${sum}) at CEFR ${lv}. Vocabulary at ${lv}. Vary topics and sentence patterns; do NOT repeat these existing items: ${have}
+        const sb=await stdBlock('grammar');const d=await ask(`${sb}Write 20 NEW grammar exercises for Vietnamese learners on "${title}" (${sum}) at CEFR ${lv}. Vocabulary at ${lv}. Vary topics and sentence patterns; do NOT repeat these existing items: ${have}
 Mix exactly: 5 "mcq" (4 options, "q" contains "_____"), 4 "type" (fill "_____" with 1–4 words, list accepted alternatives), 4 "error" (a sentence with 4 underlined parts given as "options" copied verbatim from the sentence, exactly one is wrong; "fix" = corrected part), 3 "order" (answer = one correct sentence of 5–14 words; "vi" = its Vietnamese meaning), 2 "rewrite" ("q" = original sentence, "hint" = start words or keyword in Vietnamese, "answer" = accepted rewrites), 2 "trans" ("q" = a Vietnamese sentence, "answer" = accepted English translations using this grammar point). Every item has a short Vietnamese "explain_vi".
 Return ONLY JSON: {"exercises":[{"type":"mcq|type|error|order|rewrite|trans","q":string,"options":[...],"answer":number|string|[strings],"fix":string,"vi":string,"hint":string,"explain_vi":string}]}`);
         const add=(d.exercises||[]).filter(x=>x&&x.q||x&&x.type==='order');L.exercises=(L.exercises||[]).concat(add);await putDoc('gram_'+id,L);
@@ -2970,7 +3017,7 @@ async function makePlan(opts,extraNotes){
   const res=await ask(`You are an expert English teacher planning self-study for a Vietnamese university student (learner name: ${p.name}).
 Placement test: ${t?`overall ${t.overall}; vocab+grammar ${t.vg.level} (${t.vg.c}/${t.vg.n}); reading ${t.read.level} (${t.read.c}/${t.read.n}); listening ${t.listen.level} (${t.listen.c}/${t.listen.n}); writing ${t.write.level} (${t.write.score}/10); speaking ${t.speak.level} (${t.speak.score}/10)`:'not taken; assume '+lv}.
 Goal: ${opts.goal} (target CEFR ${tgt}). Exam date: ${opts.examDate||'not set'} (today ${todayKey()}). Time per study day: ${opts.minutes} minutes. Study days per week: ${opts.dpw} (plan only study days; number them consecutively).
-Learner notes: ${opts.note||'none'}${extraNotes?'\nAdvice from coaching chat to respect:\n'+extraNotes:''}
+Learner notes: ${opts.note||'none'}${stdMats().length?'\nLearner\'s own study materials (the standard to follow; build tasks around these topics and skills): '+stdMats().map(m=>m.title+' ('+(MAT_KIND[m.kind]||m.kind)+(m.level?', '+m.level:'')+')').join('; '):''}${extraNotes?'\nAdvice from coaching chat to respect:\n'+extraNotes:''}
 ${opts.continue?'This continues an existing plan. Progress so far: '+progressSummary()+' Do not repeat grammar lessons already done unless review is needed.':''}
 Create a detailed plan for the next ${opts.dpw*4} study days (4 weeks), starting at study day ${startDay+1}. Focus most on the weakest skills; build from current level to target; include spaced review and a mini mock test at the end of week 2 and week 4. Every day's total minutes ≈ ${opts.minutes}.
 Each day has 2–5 tasks chosen ONLY from these types:
