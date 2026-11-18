@@ -231,6 +231,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 .vt{width:100%;border-collapse:collapse;font-size:14.5px}.vt td{border-bottom:1px solid var(--rule);padding:6px 8px;vertical-align:top}
 .instr{background:var(--ink-2);border-left:3px solid var(--ink);padding:8px 12px;margin:0 0 12px;font-size:14.5px;line-height:1.6;white-space:pre-wrap;max-width:40em}
 .tpls li{margin:6px 0;line-height:1.7}.tpls .ph{background:var(--ink-2);color:var(--ink);border-radius:4px;padding:1px 6px;font-size:.92em;white-space:nowrap}
+.blog{margin:6px 0 0;padding-left:18px;font-size:14px}.blog li{margin:3px 0}.blog .ok{color:var(--ok)}.blog .bad{color:var(--red)}
 .foot{border-top:1px solid var(--rule);margin-top:30px;padding:18px 0;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -488,6 +489,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
           <label class="btn ghost" style="cursor:pointer">📷 Chụp ảnh<input type="file" id="b-cam" accept="image/*" capture="environment" class="hidden"></label>
           <select id="b-type"><option value="vstep">Đề VSTEP</option><option value="toeic">Đề TOEIC</option><option value="other">Đề khác</option></select>
         </div>
+        <div id="b-files"></div>
         <div id="b-imgs"></div>
         <textarea id="b-text" style="min-height:140px;margin-top:8px" placeholder="Hoặc dán nội dung đề hay tài liệu (kèm đáp án nếu có)…"></textarea>
         <div class="row" style="justify-content:space-between;margin-top:8px">
@@ -500,6 +502,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
           <select id="b-mklv"><option>A2</option><option selected>B1</option><option>B2</option><option>C1</option></select></div>
         <p class="mute" style="margin:6px 0 0"><b>Nạp đề có sẵn</b>: giữ nguyên đề trong tài liệu để làm bấm giờ. <b>Tạo đề mới</b>: dùng sách, bài đọc, danh sách từ, ghi chép của bạn để AI ra câu hỏi luyện tập. <b>Lưu thành tài liệu</b>: tài liệu hướng dẫn, bài giảng, mẹo, dàn ý được AI tóm thành bài học, lưu vào “Tài liệu của tôi” để đọc lại, ôn từ và ra đề bất cứ lúc nào.</p>
         <div id="b-msg"></div>
+        <div id="b-batch"></div>
       </div>
     </div>
   </div>
@@ -1685,23 +1688,54 @@ function upInfo(){const n=upImgs.length,box=$('#b-imgs');if(!box)return;
   box.innerHTML=n?`<div class="thumbs">${upImgs.slice(0,12).map((u,i)=>`<div class="th"><img src="${u}" alt=""><button class="x" data-ix="${i}" title="Bỏ ảnh này">×</button></div>`).join('')}</div><p class="mute" style="margin:4px 0 0">${n} trang ảnh. ${visionOn()?'Gemini sẽ đọc thẳng từ ảnh (chính xác hơn, giữ được bảng và đáp án khoanh).':'Web sẽ tự nhận chữ trong ảnh (OCR) rồi tách đề. Ảnh càng nét, thẳng, đủ sáng thì càng chính xác.'}</p>`:'';
   box.querySelectorAll('[data-ix]').forEach(b=>b.onclick=()=>{upImgs.splice(+b.dataset.ix,1);upInfo();});}
 function visionOn(){return STANDALONE&&typeof apiOn==='function'&&apiOn();}
+let upFiles=[];   /* từng file đã đọc: {name,text,imgs} để xử lý riêng từng file */
 async function readUploads(files){
-  const msg=$('#b-msg');let txt='',added=0;
+  const msg=$('#b-msg');let txt='',added=0;const skipped=[];
   for(const f of files){
-    msg.innerHTML=spin(`Đang đọc ${esc(f.name)}…`);
-    if(IMG_RE.test(f.name)||/^image\//.test(f.type)){const im=await fileToImg(f);upImgs.push(canvasJpeg(im,im.naturalWidth,im.naturalHeight));added++;continue;}
+    msg.innerHTML=spin(`Đang đọc ${esc(f.name)}… (${files.indexOf(f)+1}/${files.length})`);
+    try{
+    if(IMG_RE.test(f.name)||/^image\//.test(f.type)){const im=await fileToImg(f),u=canvasJpeg(im,im.naturalWidth,im.naturalHeight);upImgs.push(u);upFiles.push({name:f.name,text:'',imgs:[u]});added++;continue;}
     if(/\.pdf$/i.test(f.name)||f.type==='application/pdf'){
       const t=await pdfText(f);
-      if(t.replace(/\s/g,'').length>=50){txt+=(txt?'\n\n':'')+t.trim();continue;}
-      const{imgs,total}=await pdfPages(f,15);upImgs.push(...imgs);added+=imgs.length;
-      if(total>15)msg.insertAdjacentHTML('beforeend',`<div class="note">PDF scan có ${total} trang, chỉ lấy 15 trang đầu. Nên tách nhỏ theo kỹ năng.</div>`);continue;}
-    if(/\.docx$/i.test(f.name))throw{message:'File Word (.docx): hãy mở bằng Word, chọn Lưu thành PDF rồi tải PDF lên, hoặc copy nội dung dán vào ô.'};
-    txt+=(txt?'\n\n':'')+(await f.text()).trim();
+      if(t.replace(/\s/g,'').length>=50){txt+=(txt?'\n\n':'')+t.trim();upFiles.push({name:f.name,text:t.trim(),imgs:[]});continue;}
+      const{imgs,total}=await pdfPages(f,15);upImgs.push(...imgs);upFiles.push({name:f.name,text:'',imgs});added+=imgs.length;
+      if(total>15)msg.insertAdjacentHTML('beforeend',`<div class="note">${esc(f.name)}: PDF scan có ${total} trang, chỉ lấy 15 trang đầu.</div>`);continue;}
+    if(/\.docx$/i.test(f.name)){skipped.push(f.name+' (Word: lưu thành PDF rồi tải lại)');continue;}
+    const t=(await f.text()).trim();txt+=(txt?'\n\n':'')+t;upFiles.push({name:f.name,text:t,imgs:[]});
+    }catch(e){skipped.push(f.name+' ('+(e.message||'không đọc được')+')');}
   }
-  upImgs=upImgs.slice(0,20);
+  if(skipped.length)msg.insertAdjacentHTML('beforeend',`<div class="note">Bỏ qua: ${skipped.map(esc).join('; ')}</div>`);
+  upImgs=upImgs.slice(0,20);renderUpFiles();
   if(txt)$('#b-text').value=($('#b-text').value.trim()?$('#b-text').value.trim()+'\n\n':'')+txt;
   upInfo();
-  msg.innerHTML=`<p class="mute">${txt?`Đã đọc ${txt.length.toLocaleString()} ký tự chữ. `:''}${added?`Đã thêm ${added} trang ảnh. `:''}Chọn “Nạp đề có sẵn” hoặc “Tạo đề mới từ tài liệu”.</p>`;
+  msg.innerHTML=`<p class="mute">${upFiles.length>1?`Đã đọc ${upFiles.length} file. `:''}${txt?`Đã đọc ${txt.length.toLocaleString()} ký tự chữ. `:''}${added?`Đã thêm ${added} trang ảnh. `:''}Chọn “Nạp đề có sẵn” hoặc “Tạo đề mới từ tài liệu”.</p>`;
+}
+function renderUpFiles(){
+  const box=$('#b-files');if(!box)return;const n=upFiles.length;
+  if(n<2){box.innerHTML='';return;}
+  const allImg=upFiles.every(f=>!f.text&&f.imgs.length===1);
+  if(state.upSep==null)state.upSep=!allImg;
+  box.innerHTML=`<div class="panel" style="margin:8px 0;padding:10px 12px"><b>${n} file:</b> <span class="mute">${upFiles.map(f=>esc(f.name)).join(' · ')}</span>
+    <div style="margin-top:6px"><label><input type="radio" name="b-sep" value="1" ${state.upSep?'checked':''}> <b>Xử lý từng file riêng</b> <span class="mute">(${n} file → ${n} đề hoặc tài liệu)</span></label><br>
+    <label><input type="radio" name="b-sep" value="0" ${!state.upSep?'checked':''}> <b>Gộp tất cả thành 1</b> <span class="mute">(các ảnh, file là các trang của cùng một đề hoặc tài liệu)</span></label></div>
+    <button class="btn sm ghost" id="b-clear" style="margin-top:6px">Xoá danh sách file</button></div>`;
+  box.querySelectorAll('[name=b-sep]').forEach(r=>r.onchange=()=>{state.upSep=r.value==='1';save();});
+  $('#b-clear').onclick=()=>{upFiles=[];upImgs=[];$('#b-text').value='';upInfo();renderUpFiles();$('#b-msg').innerHTML='';};
+}
+/* chạy một nút (Nạp đề / Tạo đề / Lưu tài liệu) lần lượt cho từng file */
+async function runPerFile(handler,label){
+  const files=upFiles.slice(),log=[],msg=$('#b-msg'),btns=['#b-import','#b-make','#b-save'].map(id=>$(id));
+  btns.forEach(b=>b.disabled=true);upFiles=[];
+  for(let i=0;i<files.length;i++){const f=files[i];
+    $('#b-batch').innerHTML=`<div class="note">${label}: đang xử lý file ${i+1}/${files.length} – ${esc(f.name)}</div>`+(log.length?`<ul class="blog">${log.join('')}</ul>`:'');
+    $('#b-text').value=f.text;upImgs=f.imgs.slice();upInfo();
+    try{await handler();}catch(e){}
+    const res=(msg.innerText||'').split('\n')[0].trim();const ok=/^Đã (nạp|tạo|lưu)/.test(res);
+    log.push(`<li class="${ok?'ok':'bad'}">${ok?'✓':'✗'} <b>${esc(f.name)}</b>: ${esc(res||'không rõ kết quả')}</li>`);}
+  $('#b-text').value='';upImgs=[];upInfo();renderUpFiles();
+  const nOk=log.filter(x=>x.includes('class="ok"')).length;
+  $('#b-batch').innerHTML=`<div class="note">${label}: xong ${nOk}/${files.length} file.</div><ul class="blog">${log.join('')}</ul>`;
+  msg.innerHTML='';btns.forEach(b=>b.disabled=false);renderBank();
 }
 /* lấy nội dung tài liệu: ảnh → Gemini đọc thẳng (nếu có) hoặc OCR */
 async function materialText(msg){
@@ -1748,7 +1782,7 @@ Return ONLY JSON: {"title":string,"sections":[{"skill":string,"title":string,"in
     const id=Date.now().toString(36),nq=secs.reduce((a,s)=>a+(s.questions||[]).length,0);
     await putDoc('exam_'+id,{type,title:d.title,sections:secs});
     state.exams.unshift({id,type,title:d.title||'Đề đã nạp',n:nq,skills:[...new Set(secs.map(s=>s.skill))],t:Date.now()});save();autoShare('exam',id);
-    msg.innerHTML=`<p class="mute">Đã nạp “${esc(d.title||'')}” – ${nq} câu trắc nghiệm.</p>`;$('#b-text').value='';upImgs=[];upInfo();renderBank();
+    msg.innerHTML=`<p class="mute">Đã nạp “${esc(d.title||'')}” – ${nq} câu trắc nghiệm.</p>`;$('#b-text').value='';upImgs=[];upInfo();upFiles=[];renderUpFiles();renderBank();
   }catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`}
   $('#b-import').disabled=false;
 };
@@ -1839,6 +1873,9 @@ async function guideBlock(skill){
 }
 
 $('#b-save').onclick=saveMaterial;
+const _imp=$('#b-import').onclick;
+$('#b-import').onclick=()=>upFiles.length>1&&state.upSep?runPerFile(_imp,'Nạp đề có sẵn'):_imp();
+$('#b-save').onclick=async()=>{if(upFiles.length>1&&state.upSep)return runPerFile(saveMaterial,'Lưu thành tài liệu');await saveMaterial();if(!$('#b-text').value&&!upImgs.length){upFiles=[];renderUpFiles();}};
 $('#b-make').onclick=async()=>{
   await ready;const msg=$('#b-msg'),b=$('#b-make');let text;
   try{text=await materialText(msg);}catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`;return;}
@@ -1862,6 +1899,7 @@ Return ONLY JSON: {"title":string,"skill":"reading|vocab|grammar|mixed","text":s
   }catch(e){msg.innerHTML=`<p class="mute">${errMsg(e)}</p>`}
   b.disabled=false;
 };
+{const _mk2=$('#b-make').onclick;$('#b-make').onclick=()=>upFiles.length>1&&state.upSep?runPerFile(_mk2,'Tạo đề mới'):_mk2();}
 const SK={reading:'Reading',listening:'Listening',writing:'Writing',speaking:'Speaking'};const SKC={reading:'read',listening:'listen',writing:'write',speaking:'speak'};
 let genF='';
 document.querySelectorAll('#gen-f button').forEach(b=>b.onclick=()=>{genF=b.dataset.f;document.querySelectorAll('#gen-f button').forEach(x=>x.classList.toggle('on',x===b));renderBank();});
