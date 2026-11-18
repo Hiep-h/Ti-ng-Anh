@@ -860,7 +860,8 @@ function apiOn(){return !!(STANDALONE&&supa&&acct&&lsGet('vstep-api')!==0&&!(lsG
 async function aiApi(prompt,images){
   const{data,error}=await supa.functions.invoke('ai',{body:images&&images.length?{prompt,images}:{prompt}});
   if(error){let st=error.context&&error.context.status,b={};try{b=await error.context.json();}catch(e){}
-    throw{code:st===429?'quota':st===404?'noapi':st===401?'auth':(b.error||'api'),message:b.detail||b.error||error.message};}
+    const tm=st===546||st===504||b.error==='timeout';
+    throw{code:st===429?'quota':st===404?'noapi':st===401?'auth':tm?'timeout':st===413?'big':(b.error||'api'),message:tm?'AI xử lý quá lâu (tài liệu dài hoặc Gemini đang chậm)':st===413?'Tài liệu quá lớn để gửi một lần':b.detail||b.error||(st?`Máy chủ báo lỗi ${st}`:error.message)};}
   if(!data||!data.text)throw{code:'empty',message:'AI trả về rỗng'};
   if(data.finish==='MAX_TOKENS')throw{code:'cut',message:'Câu trả lời bị cắt'};
   return data.text;
@@ -875,6 +876,7 @@ async function askGPT(prompt,raw){
         if(e.code==='quota'){lsSet('vstep-api-off-until',Date.now()+60*60*1000);apiNote='Gemini miễn phí đã hết lượt tạm thời (thử lại sau khoảng 1 giờ). Lần này làm bằng copy–dán nhé.';break;}
         if(e.code==='noapi'||e.code==='nokey'){lsSet('vstep-api-off-until',Date.now()+10*60*1000);apiNote='Chưa cài hàm AI trên Supabase (xem HUONG-DAN.md). Lần này làm bằng copy–dán.';break;}
         if(e.code==='auth'){apiNote='Phiên đăng nhập hết hạn, hãy đăng nhập lại để dùng AI tự động.';break;}
+        if(e.code==='timeout'||e.code==='big'){apiNote=esc(e.message)+'. Lần này làm bằng copy–dán, hoặc tách tài liệu nhỏ hơn rồi thử lại.';break;}
         apiNote='AI tự động gặp lỗi ('+esc(e.message||e.code||'')+'). Lần này làm bằng copy–dán.';
       }
     }
@@ -1734,7 +1736,9 @@ async function runPerFile(handler,label){
     log.push(`<li class="${ok?'ok':'bad'}">${ok?'✓':'✗'} <b>${esc(f.name)}</b>: ${esc(res||'không rõ kết quả')}</li>`);}
   $('#b-text').value='';upImgs=[];upInfo();renderUpFiles();
   const nOk=log.filter(x=>x.includes('class="ok"')).length;
-  $('#b-batch').innerHTML=`<div class="note">${label}: xong ${nOk}/${files.length} file.</div><ul class="blog">${log.join('')}</ul>`;
+  const failed=files.filter((f,i)=>!log[i].includes('class="ok"'));
+  $('#b-batch').innerHTML=`<div class="note">${label}: xong ${nOk}/${files.length} file.</div><ul class="blog">${log.join('')}</ul>`+(failed.length?`<div class="row" style="margin-top:6px"><button class="btn sm" id="b-retry">Thử lại ${failed.length} file lỗi</button><span class="mute">File quá dài (ví dụ 20 đề trong 1 PDF) nên tách nhỏ ra trước.</span></div>`:'');
+  if(failed.length)$('#b-retry').onclick=()=>{upFiles=failed;state.upSep=true;runPerFile(handler,label);};
   msg.innerHTML='';btns.forEach(b=>b.disabled=false);renderBank();
 }
 /* lấy nội dung tài liệu: ảnh → Gemini đọc thẳng (nếu có) hoặc OCR */
@@ -1747,12 +1751,25 @@ async function materialText(msg){
   }
   return text;
 }
+async function transcribePages(imgs,onp){
+  /* Gemini chép lại chữ theo từng nhóm 4 trang (mỗi lần gọi ngắn, không quá giới hạn 150 giây); lỗi thì nhận chữ trên máy (OCR) */
+  let out='';
+  for(let i=0;i<imgs.length;i+=4){const part=imgs.slice(i,i+4);onp&&onp(i+1,Math.min(i+4,imgs.length),imgs.length);
+    try{const t=await aiApi(`Transcribe ALL text on these ${part.length} document page images in reading order. Keep the original wording, numbering, options (A–D) and any marked/circled answers or answer keys (write them as "Answer: X"). Join lines broken mid-sentence; separate paragraphs with a blank line. Plain text only, no commentary.`,part.map(u=>({mime:'image/jpeg',data:u.split(',')[1]})));out+=t.trim()+'\n\n';}
+    catch(e){if(e.code==='quota'||e.code==='timeout'||e.code==='api'||e.code==='big'){out+=(await ocrImages(part))+'\n\n';}else throw e;}}
+  return out.trim();
+}
 async function askDoc(prompt,text){
   /* gửi kèm ảnh cho Gemini khi có thể; không thì gửi chữ */
+  if(upImgs.length&&visionOn()&&(upImgs.length>4||(text||'').length>6000)){
+    const msg=$('#b-msg');const t=await transcribePages(upImgs,(a,b,n)=>{if(msg)msg.innerHTML=spin(`Gemini đang đọc trang ${a}–${b}/${n}…`);});
+    if(msg)msg.innerHTML=spin('Đang xử lý nội dung đã đọc…');
+    return ask(prompt.replace('%%DOC%%',`Document:\n"""${((text?text+'\n\n':'')+t).slice(0,30000)}"""`),'complex');
+  }
   if(upImgs.length&&visionOn()){
     const imgs=upImgs.map(u=>({mime:'image/jpeg',data:u.split(',')[1]}));
-    const t=await aiApi(prompt.replace('%%DOC%%',text?`Text part of the document:\n"""${text}"""\nThe remaining pages are attached as images (in order).`:'The document pages are attached as images (in order). Read them carefully, including circled/ticked answers and answer keys.'),imgs);
-    return parseJSON(t);
+    let t;try{t=await aiApi(prompt.replace('%%DOC%%',text?`Text part of the document:\n"""${text}"""\nThe remaining pages are attached as images (in order).`:'The document pages are attached as images (in order). Read them carefully, including circled/ticked answers and answer keys.'),imgs);}catch(e){if(['quota','timeout','api','big','empty','cut'].includes(e.code)){const tt=await transcribePages(upImgs);return ask(prompt.replace('%%DOC%%',`Document:\n"""${((text?text+'\n\n':'')+tt).slice(0,30000)}"""`),'complex');}throw e;}
+    try{return parseJSON(t);}catch(e){return ask(prompt.replace('%%DOC%%',`Document (transcribed):\n"""${t}"""`),'complex');}
   }
   return ask(prompt.replace('%%DOC%%',`Document:\n"""${text}"""`),'complex');
 }
@@ -1796,7 +1813,7 @@ async function saveMaterial(){
   if(text.length>24000)text=text.slice(0,24000);
   b.disabled=true;msg.innerHTML=spin('AI đang biến tài liệu thành bài học…');
   try{const d=await askDoc(`The learner (Vietnamese, preparing for VSTEP then TOEIC) uploaded THEIR OWN study material: a guide, lesson, teacher's notes, tips, template or worksheet. Turn it into a compact study lesson in Vietnamese that keeps the material's own content (do not invent new rules; English examples stay in English).
-Also return "source_text": a clean transcription of the material's text (fix OCR errors, keep wording, max ~6000 words).
+Also return "source_text": a clean transcription of the material's main text (fix OCR errors, keep wording; at most ~2500 words, cut the rest).
 Return ONLY JSON: {"title":"tên bài ngắn (tiếng Việt)","kind":"grammar|reading|listening|writing|speaking|vocab|tips|other","level":"A2|B1|B2|C1","summary_vi":"2-4 câu: tài liệu dạy gì","points":[{"h":"tiêu đề ý chính","body":"giải thích ngắn bằng tiếng Việt, giữ ví dụ/khung câu tiếng Anh của tài liệu"}],"templates":["khung câu / dàn ý / cụm dùng được ngay, nguyên văn tiếng Anh"],"vocab":[{"w":string,"vi":string,"ex":"example sentence"}],"checklist_vi":["điều cần nhớ/kiểm tra khi làm bài"],"source_text":string}
 %%DOC%%`,text);
     const id='m'+Date.now().toString(36);
