@@ -652,13 +652,16 @@ const BROWSER_NOSR=/coc_coc|brave|opr\/|yabrowser/i.test(navigator.userAgent)||!
 function makeSR(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR)return null;
   /* Chrome tự ngắt nhận giọng khi im lặng vài giây hoặc sau khoảng 1 phút: tự bật lại cho đến khi người dùng bấm Dừng */
-  let rec=null,want=false,fails=0,lastStart=0;const cb={p:()=>{},f:()=>{},s:()=>{}};
+  let rec=null,want=false,fails=0,lastStart=0,soft=0;const cb={p:()=>{},f:()=>{},s:()=>{}};
   const make=()=>{const r=new SR();r.lang='en-US';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
-    r.onresult=e=>{fails=0;let it='';for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i];if(x.isFinal){const t=x[0].transcript.trim();if(t)cb.f({text:t});}else it+=x[0].transcript;}cb.p({text:it});};
-    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){want=false;r._err='không tìm thấy micro';}else if(e.error==='network'){want=false;r._err=BROWSER_NOSR?'Cốc Cốc không có dịch vụ nhận giọng của Google, hãy mở web bằng Chrome hoặc Edge':'không kết nối được dịch vụ nhận giọng, kiểm tra mạng';}};
+    r.onresult=e=>{fails=0;soft=0;let it='';for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i];if(x.isFinal){const t=x[0].transcript.trim();if(t)cb.f({text:t});}else it+=x[0].transcript;}cb.p({text:it});};
+    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){/* hay do bộ ghi âm giành micro: tắt ghi âm rồi thử lại */if(soft<3&&mrec&&mrec.state==='recording'){soft++;recStop();r._wait=600;}else{want=false;r._err='không tìm thấy micro hoặc micro đang bị ứng dụng khác dùng';}}
+      else if(e.error==='network'&&!BROWSER_NOSR&&navigator.onLine!==false&&soft<6){soft++;r._wait=800*soft;/* dịch vụ nhận giọng của Google chập chờn: chờ chút rồi tự bật lại */}
+      else if(e.error==='network'){want=false;r._err=BROWSER_NOSR?'Cốc Cốc không có dịch vụ nhận giọng của Google, hãy mở web bằng Chrome hoặc Edge':'không kết nối được dịch vụ nhận giọng, kiểm tra mạng';}};
     r.onend=()=>{if(rec!==r)return;
       if(want){if(Date.now()-lastStart<1500)fails++;else fails=0;
-        if(fails<6){setTimeout(()=>{if(!want)return;try{rec=make();lastStart=Date.now();rec.start();}catch(e){want=false;cb.s({state:'idle',reason:'không bật lại được'});}},fails?300:50);return;}
+        if(fails<8){const wait=r._wait||(fails?300*fails:50);if(r._wait)fails=0;cb.s({state:'resume'});
+          setTimeout(()=>{if(!want)return;try{rec=make();lastStart=Date.now();rec.start();}catch(e){setTimeout(()=>{if(!want)return;try{rec=make();lastStart=Date.now();rec.start();}catch(e2){want=false;cb.s({state:'idle',reason:'không bật lại được micro'});}},700);}},wait);return;}
         want=false;cb.s({state:'idle',reason:'trình duyệt ngắt nhận giọng nhiều lần'});return;}
       cb.s({state:'idle',reason:r._deny?'chưa cho phép micro':r._err||'stopped'});};
     return r;};
@@ -680,17 +683,42 @@ async function loadState(){
   let l=lsGet(LSK());if(!l&&acct)l=lsGet('vstep-state');if(l)state=Object.assign(state,l);
   let remote='fail';
   if(db&&uid){try{const r=await Promise.race([db.doc(`data/users/${uid}/state`).get(),new Promise(z=>setTimeout(()=>z('TIMEOUT'),10000))]);
-    if(r!=='TIMEOUT'){const d=unwrap(r);if(d&&(d.hist||d.profiles)){state=Object.assign(state,d);remote='ok';}else if(!d)remote='empty';}}catch(e){}}
+    if(r!=='TIMEOUT'){const d=unwrap(r);if(d&&(d.hist||d.profiles)){remoteT=d._t||0;
+      if(l&&(l.hist||l.profiles)){const loc=JSON.parse(JSON.stringify(l));const m=(loc._t||0)>(d._t||0)?mergeStates(d,loc):mergeStates(loc,d);state=Object.assign(state,m);remote=(loc._t||0)>(d._t||0)?'newer':'ok';}
+      else{state=Object.assign(state,d);remote='ok';}}else if(!d)remote='empty';}}catch(e){}}
   state=JSON.parse(JSON.stringify(state));['decks','exams','hist','gens'].forEach(k=>state[k]=Array.isArray(state[k])?state[k]:[]);['srs','last','road','lastW','pool','gram','daily'].forEach(k=>state[k]=(state[k]&&typeof state[k]==='object'&&!Array.isArray(state[k]))?state[k]:{});
   installProfiles();
   renderAll();
-  if(acct&&remote==='empty')save();   /* lần đầu đăng nhập: đẩy dữ liệu đang có trên máy lên tài khoản */
+  if(acct&&(remote==='empty'||remote==='newer'))save();   /* lần đầu đăng nhập: đẩy dữ liệu đang có trên máy lên tài khoản */
 }
 const LSK=()=>'vstep-state'+(acct?':'+uid:'');
-let saving=Promise.resolve(),saveT=null;
-function pushRemote(){saveT=null;const snap=JSON.parse(JSON.stringify(state));syncSt('busy');
-  saving=saving.then(()=>db.doc(`data/users/${uid}/state`).set(snap)).then(()=>syncSt('ok')).catch(()=>syncSt('err'));return saving;}
-function save(){lsSet(LSK(),state);if(db&&uid){clearTimeout(saveT);if(acct){syncSt('wait');saveT=setTimeout(pushRemote,1500);}else pushRemote();}}
+let saving=Promise.resolve(),saveT=null,remoteT=0;
+/* Gộp 2 bản dữ liệu (máy này và tài khoản) thay vì ghi đè: không mất bài đã học khi dùng 2 máy, 2 tab hoặc đóng trang trước khi kịp đồng bộ */
+const DELKEY={gens:'gen_',exams:'exam_',decks:'deck_',mats:'mat_'};
+function mergeVal(a,b,del,pk){
+  if(b===undefined)return a;if(a===undefined||a===null)return b;
+  if(Array.isArray(a)&&Array.isArray(b)){
+    const key=x=>x&&typeof x==='object'?(x.id!=null?'i:'+x.id:x.t!=null?'t:'+x.t+':'+(x.label||x.w||x.skill||''):null):null;
+    if(!(a.length&&a.every(key)||b.length&&b.every(key)))return b;
+    const pre=DELKEY[pk];if(pre&&del){const gone=x=>x&&x.id!=null&&del[pre+x.id]&&!(x.t>del[pre+x.id]);a=a.filter(x=>!gone(x));b=b.filter(x=>!gone(x));}
+    const seen=new Set(b.map(key));
+    const extra=a.filter(x=>{const k=key(x);return k&&!seen.has(k)&&!(pre&&x.id!=null&&del&&del[pre+x.id]);});
+    if(!extra.length)return b;const out=b.concat(extra);if(out.every(x=>x&&x.t))out.sort((x,y)=>y.t-x.t);return out;}
+  if(typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){const o=Object.assign({},a);for(const k in b)o[k]=mergeVal(a[k],b[k],del,k);return o;}
+  return b;
+}
+function mergeStates(older,newer){const del=Object.assign({},older._del||{},newer._del||{});const m=mergeVal(older,newer,del,'');m._del=del;m._t=Math.max(older._t||0,newer._t||0);m.cur=newer.cur||older.cur;return m;}
+const snapState=()=>JSON.parse(JSON.stringify(state));
+function adoptState(m){state=m;['decks','exams','hist','gens'].forEach(k=>state[k]=Array.isArray(state[k])?state[k]:[]);installProfiles();lsSet(LSK(),state);try{renderAll();}catch(e){}}
+async function readRemote(){const r=await Promise.race([db.doc(`data/users/${uid}/state`).get(),new Promise(z=>setTimeout(()=>z('TIMEOUT'),10000))]);if(r==='TIMEOUT')throw 'timeout';return unwrap(r);}
+function pushRemote(){saveT=null;syncSt('busy');
+  saving=saving.then(async()=>{
+    try{const r=await readRemote();if(r&&(r.hist||r.profiles)&&(r._t||0)>remoteT&&r._t!==state._t)adoptState(mergeStates(r,snapState()));}catch(e){}
+    const snap=snapState();await db.doc(`data/users/${uid}/state`).set(snap);remoteT=snap._t||0;}).then(()=>syncSt('ok')).catch(()=>syncSt('err'));return saving;}
+/* quay lại tab: lấy phần học trên máy khác về */
+async function pullRemote(){if(!db||!uid||!acct||saveT)return;try{const r=await readRemote();if(r&&(r.hist||r.profiles)&&(r._t||0)>Math.max(remoteT,state._t||0)){remoteT=r._t;adoptState(mergeStates(snapState(),r));}}catch(e){}}
+addEventListener('visibilitychange',()=>{if(!document.hidden&&!document.querySelector('#room:not(.hidden)'))pullRemote();});
+function save(){state._t=Date.now();lsSet(LSK(),state);if(db&&uid){clearTimeout(saveT);if(acct){syncSt('wait');saveT=setTimeout(pushRemote,1500);}else pushRemote();}}
 addEventListener('visibilitychange',()=>{if(document.hidden&&saveT){clearTimeout(saveT);pushRemote();}});
 addEventListener('pagehide',()=>{if(saveT){clearTimeout(saveT);pushRemote();}});
 
@@ -835,7 +863,7 @@ async function getDoc(k){
   if(db&&uid){try{const d=unwrap(await Promise.race([db.doc(`data/users/${uid}/${k}`).get(),t10()]));if(d){docCache[k]=d;return d;}}catch(e){}}
   const l=lsGet('vstep-doc-'+k);if(l){docCache[k]=l;return l;}return null;
 }
-async function delDoc(k){delete docCache[k];try{localStorage.removeItem('vstep-doc-'+k)}catch(e){}if(db&&uid){try{await db.doc(`data/users/${uid}/${k}`).delete()}catch(e){}}}
+async function delDoc(k){delete docCache[k];try{state._del=state._del||{};state._del[k]=Date.now();const ks=Object.keys(state._del);if(ks.length>600)ks.sort((a,b)=>state._del[a]-state._del[b]).slice(0,ks.length-600).forEach(x=>delete state._del[x]);}catch(e){}try{localStorage.removeItem('vstep-doc-'+k)}catch(e){}if(db&&uid){try{await db.doc(`data/users/${uid}/${k}`).delete()}catch(e){}}}
 function addHist(skill,score,label){
   state.hist.unshift({t:Date.now(),skill,score,label});state.hist=state.hist.slice(0,300);
   if(typeof score==='number'&&skill.startsWith('VSTEP'))state.last[skill]=score;
@@ -1516,7 +1544,7 @@ async function openSpeak(card,givenPrompt){
     if(!bound){bound=true;
       dict.onPartial(({text})=>{ta.value=finals+text;});
       dict.onFinal(({text})=>{finals+=text+' ';ta.value=finals;$('#s-wc').textContent=wc(finals)+' từ';});
-      dict.onState(({state:st,reason})=>{listening=st==='listening';$('#s-mic').textContent=listening?'■ Dừng':'🎙 Nói tiếp';
+      dict.onState(({state:st,reason})=>{if(st==='resume'){micSt('on','🔴 Đang nghe… (micro tự nối lại, cứ nói tiếp)');return;}listening=st==='listening';$('#s-mic').textContent=listening?'■ Dừng':'🎙 Nói tiếp';
         if(listening){micSt('on','🔴 Đang nghe… Nói rõ, tự nhiên. Bấm <b>■ Dừng</b> khi xong.');if(!resumes)startClock(card.sec,stopMic);}
         else if(!userStop&&!STANDALONE&&resumes<5&&!/denied|not_granted|permission/i.test(reason||'')){resumes++;finals=ta.value?ta.value.trimEnd()+' ':'';Promise.resolve(dict.start()).catch(()=>{stopClock();recStop();micSt('','Micro bị ngắt. Bấm 🎙 Nói tiếp để nói tiếp, chữ đã nhận vẫn giữ nguyên.');});}
         else{stopClock();recStop();micSt('',reason&&!/stop/.test(reason)?`Micro đã dừng (${esc(reason)}). Bấm 🎙 Nói tiếp, chữ đã nhận vẫn giữ nguyên.`:'Micro đã tắt. Bấm 🎙 để nói tiếp, hoặc sửa chữ nhận sai rồi chấm.');}});}
