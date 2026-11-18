@@ -229,6 +229,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 .fbar{width:90px;height:8px;background:var(--ink-2);border-radius:4px;overflow:hidden;display:inline-block}.fbar i{display:block;height:100%}
 .thumbs{display:flex;flex-wrap:wrap;gap:6px}.th{position:relative;width:72px;height:96px;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:#fff}.th img{width:100%;height:100%;object-fit:cover}.th .x{position:absolute;top:2px;right:2px;border:0;background:rgba(0,0,0,.6);color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;line-height:18px}
 .vt{width:100%;border-collapse:collapse;font-size:14.5px}.vt td{border-bottom:1px solid var(--rule);padding:6px 8px;vertical-align:top}
+.instr{background:var(--ink-2);border-left:3px solid var(--ink);padding:8px 12px;margin:0 0 12px;font-size:14.5px;line-height:1.6;white-space:pre-wrap;max-width:40em}
 .foot{border-top:1px solid var(--rule);margin-top:30px;padding:18px 0;color:var(--mute);font-size:13px}
 </style>
 </head>
@@ -993,7 +994,7 @@ function mcqRoom(body,parts,opt){
       if(p.audioNote)h+=`<p class="mute">${esc(p.audioNote)}</p>`;
       h+=done?`<h4>Transcript</h4><div class="ptext">${esc(p.lines.map(l=>(l.speaker&&l.speaker!=='N'?l.speaker+': ':'')+l.text).join('\n\n'))}</div>`:`<p class="mute">Transcript sẽ hiện sau khi nộp bài.</p>`;
     }else{
-      h+=`<div class="ptext"><h4>${esc(p.title||'')}</h4>${esc(p.text||'')}</div>`;
+      h+=`${p.instr?`<div class="instr">${esc(p.instr)}</div>`:''}<div class="ptext"><h4>${esc(p.title||'')}</h4>${esc(p.text||'')}</div>`;
     }
     if(p.translation_vi)h+=done?`<div style="margin-top:14px"><button class="btn ghost sm" id="tr-tg">${p._showTr?'Ẩn bản dịch':'Xem bản dịch tiếng Việt'}</button></div>${p._showTr?`<h4 style="margin-top:12px">Bản dịch</h4><div class="ptext tr">${esc(p.translation_vi)}</div>`:''}`:'<p class="mute" style="margin-top:12px">Bản dịch tiếng Việt sẽ mở sau khi nộp bài.</p>';
     $('#pl').innerHTML=h;
@@ -1734,14 +1735,15 @@ $('#b-import').onclick=async()=>{
   $('#b-import').disabled=true;msg.insertAdjacentHTML('beforeend',spin('AI đang tách câu hỏi… (1–2 phút với đề dài)'));
   const type=$('#b-type').value,solve=$('#b-solve').checked;
   try{
-    const d=await askDoc(`The user provided an English exam (${type}) from their own copy for personal practice. Convert it into JSON WITHOUT changing the wording of passages, questions or options (fix only PDF line-break artifacts).
+    const d0=await askDoc(`The user provided an English exam (${type}) from their own copy for personal practice. Convert it into JSON WITHOUT changing the wording of passages, questions or options (fix only PDF line-break artifacts).
 - Split into sections by skill: "reading","listening","writing","speaking". Listening: questions/options only; transcript in "passage" only if the document contains it.
 - Map any answer key to "answer" (0-3). Without a key: ${solve?'solve it and set "ai_answer": true (listening without transcript: answer null)':'answer null'}.
 - Writing/speaking tasks go in "prompt" with no questions. Skip cover pages, boilerplate, answer sheets.
 - If text came from OCR or photos, silently fix obvious recognition errors (broken words, stray symbols) but keep the original wording.
+- Reflow passages into normal paragraphs: join lines broken by the PDF layout, keep real paragraph breaks as a blank line, number paragraphs [1], [2]… only if the original does. Use plain ASCII quotes and normal letters (no decorative Unicode). Options must NOT start with "A."/"B." letters.
 Return ONLY JSON: {"title":string,"sections":[{"skill":string,"title":string,"instructions":string,"passage":string,"prompt":string,"questions":[{"q":string,"options":[strings],"answer":number|null,"ai_answer":boolean,"explain_vi":string}]}]}
-%%DOC%%`,text);
-    const secs=(d.sections||[]).filter(s=>(s.questions&&s.questions.length)||s.prompt);if(!secs.length)throw{message:'Không tìm thấy câu hỏi nào.'};
+%%DOC%%`,text);const d=Object.assign({},d0,{title:cleanText(d0.title)});
+    const secs=(d.sections||[]).filter(s=>(s.questions&&s.questions.length)||s.prompt).map(s=>Object.assign({},s,{title:cleanText(s.title),instructions:cleanText(s.instructions),passage:cleanText(s.passage),prompt:cleanText(s.prompt),questions:(s.questions||[]).map(q=>Object.assign(cleanQ(q),{answer:q.answer}))}));if(!secs.length)throw{message:'Không tìm thấy câu hỏi nào.'};
     const id=Date.now().toString(36),nq=secs.reduce((a,s)=>a+(s.questions||[]).length,0);
     await putDoc('exam_'+id,{type,title:d.title,sections:secs});
     state.exams.unshift({id,type,title:d.title||'Đề đã nạp',n:nq,skills:[...new Set(secs.map(s=>s.skill))],t:Date.now()});save();autoShare('exam',id);
@@ -1763,7 +1765,7 @@ Also return "source_text": a clean transcription of the material's text (fix OCR
 Return ONLY JSON: {"title":"tên bài ngắn (tiếng Việt)","kind":"grammar|reading|listening|writing|speaking|vocab|tips|other","level":"A2|B1|B2|C1","summary_vi":"2-4 câu: tài liệu dạy gì","points":[{"h":"tiêu đề ý chính","body":"giải thích ngắn bằng tiếng Việt, giữ ví dụ/khung câu tiếng Anh của tài liệu"}],"templates":["khung câu / dàn ý / cụm dùng được ngay, nguyên văn tiếng Anh"],"vocab":[{"w":string,"vi":string,"ex":"example sentence"}],"checklist_vi":["điều cần nhớ/kiểm tra khi làm bài"],"source_text":string}
 %%DOC%%`,text);
     const id='m'+Date.now().toString(36);
-    const doc={title:d.title||'Tài liệu',kind:MAT_KIND[d.kind]?d.kind:'other',level:d.level||'',summary_vi:d.summary_vi||'',points:d.points||[],templates:d.templates||[],vocab:(d.vocab||[]).filter(v=>v&&v.w),checklist_vi:d.checklist_vi||[],source:String(d.source_text||text||'').slice(0,40000)};
+    const doc={title:d.title||'Tài liệu',kind:MAT_KIND[d.kind]?d.kind:'other',level:d.level||'',summary_vi:d.summary_vi||'',points:d.points||[],templates:d.templates||[],vocab:(d.vocab||[]).filter(v=>v&&v.w),checklist_vi:d.checklist_vi||[],source:cleanText(String(d.source_text||text||'')).slice(0,40000)};
     await putDoc('mat_'+id,doc);
     matsAll().unshift({id,title:doc.title,kind:doc.kind,level:doc.level,nv:doc.vocab.length,np:doc.points.length,grade:doc.kind==='writing'||doc.kind==='speaking',t:Date.now()});save();
     if(grp&&state.autoShare!==false)shareMat(id).catch(()=>{});
@@ -1891,14 +1893,38 @@ function renderBank(){
   if(grp){addShareBtns('#gen-list','[data-gdel]','gen','gdel');addShareBtns('#b-list','[data-exdel]','exam','exdel');}
   $('#b-list').querySelectorAll('[data-exdel]').forEach(b=>b.onclick=()=>confirmBox('Xoá đề này?','Xoá',async()=>{const id=b.dataset.exdel;state.exams=state.exams.filter(e=>e.id!==id);save();await delDoc('exam_'+id);renderBank();}));
 }
+/* Làm sạch chữ lấy từ PDF/ảnh để hiển thị giống đề web tự tạo:
+   - đổi chữ "kiểu" (𝐀𝐁𝐂 in đậm toán học, chữ full-width, ﬁ ﬂ…) về chữ thường bằng NFKC
+   - bỏ ký tự lạ, gạch nối ngắt dòng, nối các dòng bị PDF ngắt giữa câu thành đoạn liền */
+function cleanText(t){
+  if(!t)return '';
+  let s=String(t).normalize('NFKC')
+    .replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g,' ')
+    .replace(/[\u200C-\u200F\u2028\u2029\uFEFF\u00AD]/g,'')
+    .replace(/[\uE000-\uF8FF\uFFFD]/g,'')
+    .replace(/[“”„‟]/g,'"').replace(/[‘’‚‛]/g,"'")
+    .replace(/\r\n?/g,'\n').replace(/[ \t]+/g,' ').replace(/ *\n */g,'\n');
+  s=s.replace(/(\w)-\n(\w)/g,'$1$2');
+  const out=[];for(const para of s.split(/\n{2,}/)){
+    const lines=para.split('\n');let cur='';
+    for(const ln of lines){const l=ln.trim();if(!l)continue;
+      const newItem=/^(\(?[A-Da-d0-9]{1,2}[.)]|[-•●▪◦*]\s|Question\s*\d|Câu\s*\d|Part\s+\d|PART\s+\d|\[\d+\])/.test(l);
+      if(!cur)cur=l;
+      else if(newItem||/[.!?:"')\]]$/.test(cur)&&/^[A-Z"'(\[]/.test(l)&&cur.length<60)cur+='\n'+l;
+      else if(newItem)cur+='\n'+l;
+      else cur+=(/[.!?]$/.test(cur)&&/^[A-Z]/.test(l)&&lines.length<4?'\n':' ')+l;}
+    if(cur)out.push(cur);}
+  return out.join('\n\n').replace(/ {2,}/g,' ').trim();
+}
+const cleanQ=q=>Object.assign({},q,{q:cleanText(q.q),options:(q.options||[]).map(o=>cleanText(o).replace(/^\(?[A-Da-d][.)]\s*/,''))});
 async function openExam(id){
   const meta=state.exams.find(e=>e.id===id);const body=openRoom(meta.title);
   const d=await getDoc('exam_'+id);if(!d){body.innerHTML='<div class="pane">Không tải được đề.</div>';return}
   const mc=d.sections.filter(s=>s.questions&&s.questions.length),pr=d.sections.filter(s=>s.prompt&&!(s.questions&&s.questions.length));
-  if(!mc.length){body.innerHTML=`<div class="pane">${pr.map((s,i)=>`<h4>${SK[s.skill]||s.skill}</h4><div class="ptext">${esc(s.prompt)}</div><button class="btn sm" data-pr="${i}" style="margin:8px 0 16px">Làm bài này</button>`).join('')}</div>`;}
+  if(!mc.length){body.innerHTML=`<div class="pane">${pr.map((s,i)=>`<h4>${SK[s.skill]||s.skill}</h4><div class="ptext">${esc(cleanText(s.prompt))}</div><button class="btn sm" data-pr="${i}" style="margin:8px 0 16px">Làm bài này</button>`).join('')}</div>`;}
   else{
-    const parts=mc.map(s=>{const p={title:s.title||SK[s.skill],short:SK[s.skill]||s.skill,questions:s.questions.filter(q=>q.options&&q.options.length).map(q=>({...q,answer:q.answer==null?null:+q.answer}))};
-      if(s.skill==='listening'){p.audioPick=true;p.lines=s.passage?[{speaker:'N',text:s.passage}]:[];}else p.text=(s.instructions?s.instructions+'\n\n':'')+(s.passage||'');return p;});
+    const parts=mc.map(s=>{const p={title:cleanText(s.title)||SK[s.skill],short:SK[s.skill]||s.skill,questions:s.questions.filter(q=>q.options&&q.options.length).map(q=>({...cleanQ(q),answer:q.answer==null?null:+q.answer}))};
+      if(s.skill==='listening'){p.audioPick=true;p.lines=s.passage?[{speaker:'N',text:cleanText(s.passage)}]:[];}else{p.text=cleanText(s.passage||'');if(s.instructions)p.instr=cleanText(s.instructions);}return p;});
     const skills=mc.map(s=>s.skill);
     mcqRoom(body,parts,{minutes:skills.length===1&&skills[0]==='reading'?60:skills.length===1&&skills[0]==='listening'?40:null,onDone:(c,t)=>{
       let h='';if(d.type==='vstep'&&skills.length===1&&(skills[0]==='reading'||skills[0]==='listening'))h=vstepRes(skills[0]==='reading'?'VSTEP Đọc':'VSTEP Nghe',c,t,meta.title);
@@ -1907,8 +1933,8 @@ async function openExam(id){
       return h;}});
   }
   body.addEventListener('click',e=>{const b=e.target.closest('[data-pr]');if(!b)return;const s=pr[+b.dataset.pr];closeRoom();
-    if(s.skill==='speaking')openSpeak({part:d.type==='toeic'?'t11':'v3',lab:'',title:meta.title,sec:d.type==='toeic'?60:300,prep:60},s.prompt);
-    else{const t2=/250|essay/i.test(s.prompt);openWrite({task:d.type==='toeic'?(/essay|300/i.test(s.prompt)?'t8':'t67'):(t2?'v2':'v1'),title:meta.title},s.prompt);}});
+    if(s.skill==='speaking')openSpeak({part:d.type==='toeic'?'t11':'v3',lab:'',title:meta.title,sec:d.type==='toeic'?60:300,prep:60},cleanText(s.prompt));
+    else{const t2=/250|essay/i.test(s.prompt);openWrite({task:d.type==='toeic'?(/essay|300/i.test(s.prompt)?'t8':'t67'):(t2?'v2':'v1'),title:meta.title},cleanText(s.prompt));}});
 }
 
 /* =================== TIPS / TEMPLATES =================== */
