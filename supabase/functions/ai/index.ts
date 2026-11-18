@@ -21,6 +21,12 @@ Deno.serve(async (req) => {
   const who = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, { headers: { Authorization: auth, apikey }, signal: AbortSignal.timeout(10000) }).catch(() => null);
   console.log("auth", who?.status, Date.now() - t0, "ms");
   if (!who || !who.ok) return json({ error: "auth" }, 401);
+  // Tuỳ chọn: chỉ cho một số email dùng key chung (secret ALLOWED_EMAILS, cách nhau dấu phẩy). Người khác tự dán key Gemini của mình trên web.
+  const allow = (Deno.env.get("ALLOWED_EMAILS") || "").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
+  if (allow.length) {
+    const u = await who.json().catch(() => ({}));
+    if (!allow.includes(String(u?.email || "").toLowerCase())) return json({ error: "notallowed" }, 403);
+  }
 
   const key = Deno.env.get("GEMINI_API_KEY");
   if (!key) return json({ error: "nokey" }, 500);

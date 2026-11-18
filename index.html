@@ -251,6 +251,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     <button data-v="progress">Tiến độ</button>
     <button data-v="toeic">TOEIC</button>
   </div>
+  <button class="gptbtn hidden" id="ai-btn" title="AI tự động (key Gemini)">⚙ AI</button>
   <button class="gptbtn hidden" id="acct-btn" title="Tài khoản">☁ Đăng nhập <span class="dot" id="acct-dot"></span></button>
   <button class="gptbtn" id="prof-btn" title="Chọn người học">👤 Bạn</button>
   <button class="gptbtn" id="gpt-btn" title="ChatGPT">💬 ChatGPT <span class="dot" id="gpt-dot"></span></button>
@@ -641,7 +642,7 @@ const ready=(async()=>{
   try{tts=await window.claude?.use('tts')}catch(e){}
   try{db=await window.claude?.use('db');const u=await window.claude?.use('user');if(db&&u)uid=await u.id();}catch(e){db=null}
   if(!sampleFn) $('#ai-off').style.display='block';
-  }else{dict=makeSR();await acctInit();}
+  }else{dict=makeSR();await acctInit();const ab=$('#ai-btn');ab.classList.remove('hidden');ab.onclick=openAiSettings;}
   await loadState();
   if(supa&&(!acct&&!lsGet('vstep-localonly')||acct&&/type=recovery|#reset/.test(location.href)))openAcct();
 })();
@@ -776,7 +777,7 @@ async function acctInit(){
     const{data}=await supa.auth.getSession();if(data&&data.session)useAcct(data.session.user);}catch(e){supa=null;syncSt('err');}
   acctChip();
 }
-function useAcct(u){acct=u;uid=u.id;db=supaDb();acctChip();grpLoad();}
+function useAcct(u){acct=u;uid=u.id;db=supaDb();acctChip();grpLoad();loadKeyFromAccount();}
 function acctName(){return acct?(acct.email||'').split('@')[0]:'';}
 function syncSt(st){syncState=st;const d=$('#acct-dot');if(d)d.className='dot '+({ok:'on',busy:'busy',wait:'busy',err:'err'}[st]||'');const m=document.querySelector('#ac-sync');if(m)m.innerHTML=syncText();}
 function syncText(){return {ok:'Đã lưu lên tài khoản.',busy:'Đang lưu…',wait:'Sắp lưu…',err:'Chưa lưu được lên mạng (mất mạng?). Dữ liệu vẫn còn trên máy, sẽ lưu lại khi bạn học tiếp.'}[syncState]||'Dữ liệu tự lưu lên tài khoản mỗi khi bạn học.';}
@@ -789,10 +790,12 @@ function openAcct(){
     if(acct){d.innerHTML=`<div style="max-width:400px"><div class="row" style="justify-content:space-between"><h2 style="margin:0;font-size:18px">Tài khoản</h2><button class="btn ghost sm" data-x>Đóng</button></div>
       <p>Đang đăng nhập: <b>${esc(acct.email||'')}</b></p><p class="mute" id="ac-sync">${syncText()}</p>
       <p class="mute">Mở web trên máy khác và đăng nhập email này là thấy đúng tiến độ. Hai người có thể dùng chung một tài khoản (chọn tên ở nút 👤) hoặc mỗi người một tài khoản.</p>
+      <div class="row" style="margin:0 0 8px"><button class="btn sm ghost" id="ac-ai">⚙ Key Gemini của tôi ${myKey()?'(đã có ✓)':'(chưa có)'}</button></div>
       <label style="display:block;margin:0 0 10px"><input type="checkbox" id="ac-api" ${lsGet('vstep-api')!==0?'checked':''}> <b>AI tự động bằng Gemini</b> <span class="mute">(không phải copy–dán; hết lượt miễn phí thì tự chuyển sang copy–dán)</span></label>
       <div class="row"><button class="btn ghost" id="ac-now">Lưu ngay</button><button class="btn ghost" id="ac-out">Đăng xuất</button></div></div>`;
       d.querySelector('[data-x]').onclick=()=>d.remove();
       d.querySelector('#ac-now').onclick=()=>{clearTimeout(saveT);pushRemote();};
+      d.querySelector('#ac-ai').onclick=()=>{d.remove();openAiSettings();};
       d.querySelector('#ac-api').onchange=e=>{lsSet('vstep-api',e.target.checked?1:0);lsSet('vstep-api-off-until',0);};
       d.querySelector('#ac-out').onclick=async()=>{if(saveT){clearTimeout(saveT);}await pushRemote().catch(()=>{});await supa.auth.signOut();try{localStorage.removeItem(LSK())}catch(e){}location.reload();};
       return;}
@@ -802,12 +805,13 @@ function openAcct(){
       <input id="ac-pw" type="password" placeholder="Mật khẩu (ít nhất 6 ký tự)" autocomplete="current-password" style="width:100%">
       <div class="row" style="margin-top:12px"><button class="btn" id="ac-in">Đăng nhập</button><button class="btn ghost" id="ac-up">Tạo tài khoản</button><button class="btn ghost sm" id="ac-fg">Quên mật khẩu</button></div>
       <div id="ac-msg" style="margin-top:8px"></div>
-      <p class="mute" style="margin-top:12px"><a href="#" id="ac-local">Dùng trên máy này, không cần tài khoản</a></p></div>`;
+      <p class="mute" style="margin-top:12px"><a href="#" id="ac-local">Dùng trên máy này, không cần tài khoản</a> · <a href="#" id="ac-aik">⚙ Dán key Gemini</a></p></div>`;
     const msg=(t,ok)=>d.querySelector('#ac-msg').innerHTML=`<div class="note" ${ok?'style="background:var(--okbg);color:var(--ok)"':''}>${t}</div>`;
     const cred=()=>({email:d.querySelector('#ac-em').value.trim(),password:d.querySelector('#ac-pw').value});
     const busy=(on)=>d.querySelectorAll('button').forEach(b=>b.disabled=on);
     d.querySelector('[data-x]').onclick=()=>d.remove();
     d.querySelector('#ac-local').onclick=e=>{e.preventDefault();lsSet('vstep-localonly',1);d.remove();};
+    d.querySelector('#ac-aik').onclick=e=>{e.preventDefault();openAiSettings();};
     const done=async u=>{useAcct(u);lsSet('vstep-localonly',0);d.remove();await loadState();};
     d.querySelector('#ac-in').onclick=async()=>{const c=cred();if(!c.email||!c.password)return msg('Nhập email và mật khẩu.');busy(true);
       const{data,error}=await supa.auth.signInWithPassword(c);busy(false);if(error)return msg(esc(AUTHVI(error.message)));done(data.user);};
@@ -856,11 +860,73 @@ const GPT_URL_MAX=7000;
 function gptLink(text){const q=encodeURIComponent(text||'');return q.length&&q.length<=GPT_URL_MAX?'https://chatgpt.com/?q='+q:'https://chatgpt.com/';}
 /* ---- AI tự động: Gemini qua server của bạn (Supabase Edge Function "ai") ---- */
 let apiNote='';
-function apiOn(){return !!(STANDALONE&&supa&&acct&&lsGet('vstep-api')!==0&&!(lsGet('vstep-api-off-until')>Date.now()));}
+/* ---- KEY GEMINI CỦA TỪNG NGƯỜI: gọi Gemini thẳng từ trình duyệt bằng key của chính người dùng ---- */
+const GMODELS=['gemini-3.5-flash','gemini-3.5-flash-lite','gemini-flash-latest'];
+function myKey(){const k=lsGet('vstep-gkey');return typeof k==='string'&&/^AIza[\w-]{20,}$/.test(k)?k:'';}
+function serverAiOk(){return !!(STANDALONE&&supa&&acct&&lsGet('vstep-srvai')!==0);}
+async function geminiDirect(prompt,images,key){
+  const parts=[{text:prompt},...(images||[]).map(i=>({inline_data:{mime_type:i.mime,data:i.data}}))];
+  const t0=Date.now();let last='quota',detail='';
+  for(const m of GMODELS){
+    for(let a=0;a<2;a++){
+      if(Date.now()-t0>240000){last='timeout';break;}
+      const call=async think=>{const gen={temperature:0.8,maxOutputTokens:32768};if(think)gen.thinkingConfig={thinkingLevel:'low'};
+        try{return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{role:'user',parts}],generationConfig:gen}),signal:AbortSignal.timeout(180000)});}catch(e){return null;}};
+      let r=await call(true);
+      if(r&&r.status===400){const t=await r.clone().text();if(/thinking/i.test(t))r=await call(false);}
+      if(!r){last='network';break;}
+      if(r.status===503||r.status===500){last='quota';if(!a){await new Promise(z=>setTimeout(z,1500));continue;}break;}
+      if(r.status===429){last='quota';break;}
+      if(r.status===404){last='model';break;}
+      const d=await r.json().catch(()=>({}));
+      if(r.status===400||r.status===403){const msg=(d.error&&d.error.message)||'';throw{code:/API key|API_KEY|permission/i.test(msg)?'badkey':'api',message:/API key|API_KEY/i.test(msg)?'Key Gemini không hợp lệ hoặc đã bị xoá. Kiểm tra lại key ở nút ☁ / ⚙ AI.':msg||('Gemini báo lỗi '+r.status)};}
+      if(!r.ok){detail=(d.error&&d.error.message)||String(r.status);last='api';break;}
+      const c=(d.candidates||[])[0];const text=((c&&c.content&&c.content.parts)||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
+      if(!text){last='empty';break;}
+      if(c.finishReason==='MAX_TOKENS')throw{code:'cut',message:'Câu trả lời bị cắt'};
+      return text;
+    }
+    if(last==='timeout')break;
+  }
+  throw{code:last,message:last==='quota'?'Gemini của bạn đã hết lượt miễn phí hoặc đang quá tải':last==='timeout'?'AI xử lý quá lâu':last==='network'?'Không kết nối được Gemini, kiểm tra mạng':detail||'Gemini lỗi'};
+}
+async function loadKeyFromAccount(){try{if(!acct||myKey())return;const d=await getDoc('gkey');if(d&&d.k&&/^AIza/.test(d.k))lsSet('vstep-gkey',d.k);}catch(e){}}
+function openAiSettings(){
+  const d=document.createElement('div');d.className='confirm';d.style.zIndex=90;
+  const k=myKey(),srv=STANDALONE&&supa&&acct;
+  d.innerHTML=`<div style="max-width:520px"><div class="row" style="justify-content:space-between"><h2 style="margin:0;font-size:18px">⚙ AI tự động</h2><button class="btn ghost sm" data-x>Đóng</button></div>
+    <p>Dán <b>key Gemini của bạn</b> để web tự tạo đề, chấm bài, đọc ảnh mà không phải copy–dán. Key miễn phí, tạo trong 1 phút:</p>
+    <ol style="font-size:14px;margin:0 0 10px;padding-left:20px"><li>Mở <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, đăng nhập tài khoản Google <b>của bạn</b>.</li><li>Bấm <b>Create API key</b> rồi copy key (bắt đầu bằng <code>AIza</code>).</li><li>Dán vào ô dưới, bấm <b>Lưu và thử</b>.</li></ol>
+    <div class="row"><input id="ai-k" type="password" placeholder="AIza…" value="${esc(k)}" style="flex:1;min-width:220px" autocomplete="off"><button class="btn sm ghost" id="ai-eye" title="Hiện/ẩn">👁</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="ai-save">Lưu và thử</button>${k?'<button class="btn ghost" id="ai-del">Xoá key</button>':''}</div>
+    ${acct?`<label class="mute" style="display:block;margin-top:8px"><input type="checkbox" id="ai-sync" ${lsGet('vstep-gkeysync')!==0?'checked':''}> Lưu key vào tài khoản để máy khác đăng nhập không phải dán lại (chỉ bạn đọc được)</label>`:''}
+    <div id="ai-msg" style="margin-top:8px"></div>
+    <p class="mute" style="font-size:13px;margin:10px 0 0">Key chỉ được gửi tới Google (Gemini), lưu trên trình duyệt này${acct?' và trong tài khoản của bạn':''}. Gói miễn phí: Google có thể dùng nội dung gửi lên để cải thiện sản phẩm, đừng gửi thông tin cá nhân. Mỗi người nên dùng key của chính mình.</p>
+    ${srv?`<hr style="margin:12px 0"><label class="mute"><input type="checkbox" id="ai-srv" ${lsGet('vstep-srvai')!==0?'checked':''}> Khi chưa có key riêng, dùng AI chung của web (nếu chủ web cho phép)</label>`:''}</div>`;
+  document.body.appendChild(d);
+  const msg=(t,ok)=>d.querySelector('#ai-msg').innerHTML=`<div class="note" ${ok?'style="background:var(--okbg);color:var(--ok)"':''}>${t}</div>`;
+  d.querySelector('[data-x]').onclick=()=>{d.remove();acctChip&&acctChip();};
+  d.querySelector('#ai-eye').onclick=()=>{const i=d.querySelector('#ai-k');i.type=i.type==='password'?'text':'password';};
+  const sv=d.querySelector('#ai-srv');if(sv)sv.onchange=e=>lsSet('vstep-srvai',e.target.checked?1:0);
+  const sy=d.querySelector('#ai-sync');if(sy)sy.onchange=e=>lsSet('vstep-gkeysync',e.target.checked?1:0);
+  const del=d.querySelector('#ai-del');if(del)del.onclick=async()=>{lsSet('vstep-gkey','');try{if(acct)await delDoc('gkey');}catch(e){}d.remove();openAiSettings();};
+  d.querySelector('#ai-save').onclick=async()=>{const v=d.querySelector('#ai-k').value.trim();const b=d.querySelector('#ai-save');
+    if(!/^AIza[\w-]{20,}$/.test(v))return msg('Key không đúng dạng. Key Gemini bắt đầu bằng <b>AIza</b> và dài khoảng 39 ký tự.');
+    b.disabled=true;msg(spin('Đang thử key với Gemini…'));
+    try{const t=await geminiDirect('Reply with ONLY this JSON: {"ok":true}',null,v);if(!/ok/.test(t))throw{message:'Gemini trả lời lạ'};
+      lsSet('vstep-gkey',v);lsSet('vstep-api',1);lsSet('vstep-api-off-until',0);
+      if(acct&&lsGet('vstep-gkeysync')!==0){try{await putDoc('gkey',{k:v,t:Date.now()});}catch(e){}}
+      msg('✓ Key hoạt động. Từ giờ web dùng Gemini của bạn để tạo đề và chấm bài.',true);}
+    catch(e){msg(esc(e.message||'Key không dùng được.'));}finally{b.disabled=false;}};
+}
+function apiOn(){return !!(STANDALONE&&(myKey()||serverAiOk())&&lsGet('vstep-api')!==0&&!(lsGet('vstep-api-off-until')>Date.now()));}
 async function aiApi(prompt,images){
+  const k=myKey();if(k)return geminiDirect(prompt,images,k);
+  if(!serverAiOk())throw{code:'nokey',message:'Chưa có key Gemini'};
   const{data,error}=await supa.functions.invoke('ai',{body:images&&images.length?{prompt,images}:{prompt}});
   if(error){let st=error.context&&error.context.status,b={};try{b=await error.context.json();}catch(e){}
     const tm=st===546||st===504||b.error==='timeout';
+    if(st===403||b.error==='notallowed')throw{code:'notallowed',message:'AI chung của web chỉ dành cho chủ web. Hãy dán key Gemini của bạn.'};
     throw{code:st===429?'quota':st===404?'noapi':st===401?'auth':tm?'timeout':st===413?'big':(b.error||'api'),message:tm?'AI xử lý quá lâu (tài liệu dài hoặc Gemini đang chậm)':st===413?'Tài liệu quá lớn để gửi một lần':b.detail||b.error||(st?`Máy chủ báo lỗi ${st}`:error.message)};}
   if(!data||!data.text)throw{code:'empty',message:'AI trả về rỗng'};
   if(data.finish==='MAX_TOKENS')throw{code:'cut',message:'Câu trả lời bị cắt'};
@@ -873,8 +939,9 @@ async function askGPT(prompt,raw){
     for(let k=0;k<2;k++){
       try{const t=await aiApi(full);return raw?t.trim():parseJSON(t);}
       catch(e){
-        if(e.code==='quota'){lsSet('vstep-api-off-until',Date.now()+60*60*1000);apiNote='Gemini miễn phí đã hết lượt tạm thời (thử lại sau khoảng 1 giờ). Lần này làm bằng copy–dán nhé.';break;}
-        if(e.code==='noapi'||e.code==='nokey'){lsSet('vstep-api-off-until',Date.now()+10*60*1000);apiNote='Chưa cài hàm AI trên Supabase (xem HUONG-DAN.md). Lần này làm bằng copy–dán.';break;}
+        if(e.code==='quota'){lsSet('vstep-api-off-until',Date.now()+(myKey()?15:60)*60*1000);apiNote=(myKey()?'Gemini của bạn đang hết lượt hoặc quá tải (thử lại sau ít phút).':'Gemini miễn phí đã hết lượt tạm thời (thử lại sau khoảng 1 giờ).')+' Lần này làm bằng copy–dán nhé.';break;}
+        if(e.code==='badkey'||e.code==='notallowed'||e.code==='nokey'){apiNote=esc(e.message)+' <a href="#" data-aikey>Dán key Gemini</a>. Lần này làm bằng copy–dán.';break;}
+        if(e.code==='noapi'){lsSet('vstep-api-off-until',Date.now()+10*60*1000);apiNote='Chưa cài hàm AI trên Supabase. Lần này làm bằng copy–dán.';break;}
         if(e.code==='auth'){apiNote='Phiên đăng nhập hết hạn, hãy đăng nhập lại để dùng AI tự động.';break;}
         if(e.code==='timeout'||e.code==='big'){apiNote=esc(e.message)+'. Lần này làm bằng copy–dán, hoặc tách tài liệu nhỏ hơn rồi thử lại.';break;}
         apiNote='AI tự động gặp lỗi ('+esc(e.message||e.code||'')+'). Lần này làm bằng copy–dán.';
@@ -885,7 +952,7 @@ async function askGPT(prompt,raw){
     const d=document.createElement('div');d.className='confirm';d.style.zIndex=80;
     d.innerHTML=`<div style="max-width:560px;max-height:92vh;overflow:auto">
       <div class="row" style="justify-content:space-between;margin-bottom:6px"><b>💬 Làm bằng ChatGPT hoặc Gemini</b><span class="tag g">${STANDALONE?'Dùng tài khoản AI của bạn':'Không tốn lượt Claude'}</span></div>
-      ${apiNote?`<div class="note" style="margin:4px 0 8px">${apiNote}</div>`:''}
+      ${apiNote?`<div class="note" style="margin:4px 0 8px">${apiNote}</div>`:STANDALONE&&!apiOn()?`<div class="note" style="margin:4px 0 8px">Không muốn copy–dán? <a href="#" data-aikey>Dán key Gemini miễn phí của bạn</a> để web tự làm.</div>`:''}
       <ol style="margin:6px 0 10px;padding-left:20px;font-size:14px">
         <li>Bấm <b>Mở ChatGPT kèm câu lệnh</b>: ChatGPT mở ở tab mới với câu lệnh điền sẵn (đồng thời câu lệnh cũng được copy, nếu ô chat trống thì bấm Ctrl+V rồi gửi).</li>
         <li>Copy toàn bộ câu trả lời (nút copy ở góc khối code) rồi dán vào ô bên dưới.</li></ol>
@@ -895,6 +962,7 @@ async function askGPT(prompt,raw){
       <div id="g-err"></div>
       <div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn ghost sm" id="g-x">Huỷ</button><button class="btn sm acc" id="g-ok">Xong</button></div></div>`;
     document.body.appendChild(d);
+    d.querySelectorAll('[data-aikey]').forEach(a=>a.onclick=ev=>{ev.preventDefault();openAiSettings();});
     d.querySelector('#g-prompt').value=full;
     const gOpen=d.querySelector('#g-open');gOpen.href=gptLink(full);
     if(gOpen.href==='https://chatgpt.com/')gOpen.textContent='Mở ChatGPT (câu lệnh dài, dán bằng Ctrl+V)';
