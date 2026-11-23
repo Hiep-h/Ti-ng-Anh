@@ -655,7 +655,7 @@ function makeSR(){
   let rec=null,want=false,fails=0,lastStart=0,soft=0;const cb={p:()=>{},f:()=>{},s:()=>{}};
   const make=()=>{const r=new SR();r.lang='en-US';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
     r.onresult=e=>{fails=0;soft=0;let it='';for(let i=e.resultIndex;i<e.results.length;i++){const x=e.results[i];if(x.isFinal){const t=x[0].transcript.trim();if(t)cb.f({text:t});}else it+=x[0].transcript;}cb.p({text:it});};
-    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){/* hay do bộ ghi âm giành micro: tắt ghi âm rồi thử lại */if(soft<3&&mrec&&mrec.state==='recording'){soft++;recStop();r._wait=600;}else{want=false;r._err='không tìm thấy micro hoặc micro đang bị ứng dụng khác dùng';}}
+    r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){want=false;r._deny=true;}else if(e.error==='audio-capture'){/* hay do bộ ghi âm giành micro: tắt ghi âm rồi thử lại */if(soft<3&&mrec&&mrec.state==='recording'){soft++;if(!(typeof apiOn==='function'&&apiOn()))recStop();r._wait=900;}else{want=false;r._err='không tìm thấy micro hoặc micro đang bị ứng dụng khác dùng';}}
       else if(e.error==='network'&&!BROWSER_NOSR&&navigator.onLine!==false&&soft<6){soft++;r._wait=800*soft;/* dịch vụ nhận giọng của Google chập chờn: chờ chút rồi tự bật lại */}
       else if(e.error==='network'){want=false;r._err=BROWSER_NOSR?'Cốc Cốc không có dịch vụ nhận giọng của Google, hãy mở web bằng Chrome hoặc Edge':'không kết nối được dịch vụ nhận giọng, kiểm tra mạng';}};
     r.onend=()=>{if(rec!==r)return;
@@ -1501,8 +1501,9 @@ function micHelp(fail){
 }
 let mrec=null,mstream=null,mchunks=[],mclips=[];
 /* ghi âm: mỗi lần bấm 🎙 là 1 đoạn; khi chấm, các đoạn được ghép thành 1 file WAV gửi AI nghe */
+const isRec=()=>!!(mrec&&mrec.state==='recording');
 async function recStart(){
-  if(!STANDALONE||!navigator.mediaDevices||!window.MediaRecorder)return;
+  if(!STANDALONE||!navigator.mediaDevices||!window.MediaRecorder||isRec())return;
   try{mstream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});mchunks=[];mrec=new MediaRecorder(mstream);
     mrec.ondataavailable=e=>{if(e.data&&e.data.size)mchunks.push(e.data);};
     mrec.onstop=()=>{if(mchunks.length)mclips.push(new Blob(mchunks,{type:mrec.mimeType||'audio/webm'}));mchunks=[];
@@ -1562,14 +1563,14 @@ async function openSpeak(card,givenPrompt){
   const tabs=body.querySelectorAll('.rtabs button');tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));$('#pl').classList.toggle('hide-m',b.dataset.p!=='l');$('#pr').classList.toggle('hide-m',b.dataset.p!=='r');});
   const ta=$('#s-ans');ta.oninput=()=>$('#s-wc').textContent=wc(ta.value)+' từ';
   if($('#s-prep'))$('#s-prep').onclick=()=>startClock(card.prep,()=>{$('#s-mic').click();});
-  let userStop=false,resumes=0;mclips=[];
-  const stopMic=()=>{userStop=true;if(dict)dict.stop().catch(()=>{});recStop();};
+  let userStop=false,resumes=0,clockOn=false;mclips=[];
+  const stopMic=()=>{userStop=true;clockOn=false;if(dict)Promise.resolve(dict.stop()).catch(()=>{});recStop();$('#s-mic').textContent='🎙 Nói tiếp';};
   roomClose=()=>{if(listening)stopMic();recStop(true);};
   let finals='',bound=false;
   const micSt=(cls,html)=>{const m=$('#s-micst');if(m){m.className='micst '+cls;m.innerHTML=html;}};
   $('#s-mic').onclick=()=>{
     if(!dict){ta.focus();startClock(card.sec,()=>{});micSt('warn',micHelp(true));return;}
-    if(listening){stopMic();return;}
+    if(listening||isRec()){stopMic();return;}
     finals=ta.value?ta.value.trimEnd()+' ':'';userStop=false;resumes=0;
     const p=dict.start();   /* gọi ngay trong cú bấm để trình duyệt hỏi quyền micro */
     recStart();
@@ -1577,7 +1578,10 @@ async function openSpeak(card,givenPrompt){
       dict.onPartial(({text})=>{ta.value=finals+text;});
       dict.onFinal(({text})=>{finals+=text+' ';ta.value=finals;$('#s-wc').textContent=wc(finals)+' từ';});
       dict.onState(({state:st,reason})=>{if(st==='resume'){micSt('on','🔴 Đang nghe… (micro tự nối lại, cứ nói tiếp)');return;}listening=st==='listening';$('#s-mic').textContent=listening?'■ Dừng':'🎙 Nói tiếp';
-        if(listening){micSt('on','🔴 Đang nghe… Nói rõ, tự nhiên. Bấm <b>■ Dừng</b> khi xong.');if(!resumes)startClock(card.sec,stopMic);}
+        if(listening){micSt('on',isRec()?'🔴 Đang ghi âm và nghe… Nói liền một mạch, không cần ngắt. Bấm <b>■ Dừng</b> khi xong.':'🔴 Đang nghe… Nói rõ, tự nhiên. Bấm <b>■ Dừng</b> khi xong.');if(!clockOn){clockOn=true;startClock(card.sec,stopMic);}}
+        else if(!userStop&&isRec()){resumes++;$('#s-mic').textContent='■ Dừng';
+          micSt('on','🔴 Đang ghi âm… Cứ nói tiếp, phần chữ tạm dừng nhưng ghi âm vẫn chạy, AI sẽ nghe toàn bộ khi chấm. Bấm <b>■ Dừng</b> khi nói xong.');
+          if(resumes<40)setTimeout(()=>{if(!userStop&&isRec()&&!listening){finals=ta.value?ta.value.trimEnd()+' ':'';Promise.resolve(dict.start()).catch(()=>{});}},1500);}
         else if(!userStop&&!STANDALONE&&resumes<5&&!/denied|not_granted|permission/i.test(reason||'')){resumes++;finals=ta.value?ta.value.trimEnd()+' ':'';Promise.resolve(dict.start()).catch(()=>{stopClock();recStop();micSt('','Micro bị ngắt. Bấm 🎙 Nói tiếp để nói tiếp, chữ đã nhận vẫn giữ nguyên.');});}
         else{stopClock();recStop();micSt('',reason&&!/stop/.test(reason)?`Micro đã dừng (${esc(reason)}). Bấm 🎙 Nói tiếp, chữ đã nhận vẫn giữ nguyên.`:'Micro đã tắt. Bấm 🎙 để nói tiếp, hoặc sửa chữ nhận sai rồi chấm.');}});}
     Promise.resolve(p).catch(e=>{recStop(true);
@@ -1586,10 +1590,13 @@ async function openSpeak(card,givenPrompt){
       else micSt('warn','Không bật được micro'+(e&&e.code?` (${esc(e.code)})`:'')+'. '+micHelp(true));});
   };
   const go=async()=>{
-    const ans=ta.value.trim();if(wc(ans)<15){$('#s-res').innerHTML='<p class="mute">Bài nói quá ngắn để chấm.</p>';return}
-    if(listening)stopMic();stopClock();$('#s-go').disabled=true;$('#s-res').innerHTML=spin('Đang chấm…');
-    await recDone();let audio=null,aNote='';
-    if(STANDALONE&&mclips.length){if(typeof apiOn==='function'&&apiOn()){try{$('#s-res').innerHTML=spin('Đang chuẩn bị ghi âm cho AI nghe…');const w=await recWav();if(w&&w.sec>=5)audio={mime:'audio/wav',data:await blobB64(w.blob),sec:w.sec};}catch(e){}}
+    if(listening||isRec())stopMic();stopClock();await recDone();
+    const ans=ta.value.trim(),canHear=STANDALONE&&mclips.length&&typeof apiOn==='function'&&apiOn();
+    if(!canHear&&wc(ans)<15){$('#s-res').innerHTML='<p class="mute">Bài nói quá ngắn để chấm (máy mới nhận được '+wc(ans)+' từ). Bấm 🎙 Nói tiếp để nói thêm.</p>';return}
+    $('#s-go').disabled=true;$('#s-res').innerHTML=spin('Đang chấm…');
+    let audio=null,aNote='';
+    if(STANDALONE&&mclips.length){if(typeof apiOn==='function'&&apiOn()){try{$('#s-res').innerHTML=spin('Đang chuẩn bị ghi âm cho AI nghe…');const w=await recWav();if(w&&w.sec>=5)audio={mime:'audio/wav',data:await blobB64(w.blob),sec:w.sec};}catch(e){}
+        if(!audio&&wc(ans)<15){$('#s-res').innerHTML='<p class="mute">Ghi âm quá ngắn để chấm. Bấm 🎙 Nói tiếp để nói thêm.</p>';$('#s-go').disabled=false;return;}}
       else aNote='<p class="note">Muốn AI <b>nghe ghi âm</b> và chỉ ra lỗi phát âm từng từ thì bấm <b>⚙ AI</b> và dán key Gemini. Lần này AI chỉ chấm theo chữ nhận được.</p>';}
     const vstep=card.part.startsWith('v'),basic=card.part==='a'||card.part==='pt';
     const rubric=card.part==='pt'?`You are a calibrated English speaking assessor placing a learner on the CEFR scale. Rate this answer on the 5 VSTEP speaking criteria, each 0-10 with VSTEP-style calibration (B1≈4-5.5, B2≈6-8, C1≈8.5+): Ngữ pháp (Grammar), Từ vựng (Vocabulary), Phát âm (Pronunciation), Độ trôi chảy (Fluency), Tổ chức ý (Discourse). overall = mean rounded to 0.5. level = the single most likely CEFR level: exactly one of A1, A2, B1, B2, C1.`:basic?`You are a kind but honest assessor for A1–A2 English learners. Rate this spoken answer on 4 criteria, each 0-10 relative to a strong A2 performance: Trả lời đúng câu hỏi (Task), Từ vựng (Vocabulary), Ngữ pháp (Grammar), Độ trôi chảy (Fluency). overall = mean rounded to 0.5. level = estimated CEFR (A1, A1–A2, A2, A2–B1, B1). Keep comments simple.`:vstep?S_VSTEP(card.part)
@@ -1601,9 +1608,10 @@ async function openSpeak(card,givenPrompt){
       if(audio){$('#s-res').innerHTML=spin(`AI đang nghe ${audio.sec} giây ghi âm và chấm… (khoảng 30–60 giây)`);
         try{const t=await aiApi(`${common}
 IMPORTANT: if NO audio file is attached to this message, return ONLY {"noaudio":true}. Otherwise: you are LISTENING to the attached audio recording of the candidate's spoken answer (Vietnamese learner of English). Judge Pronunciation and Fluency from the audio itself: individual sounds (e.g. final consonants dropped, /θ ð/, /ʃ s/, /v w/, /l n/, short vs long vowels), word stress, sentence stress and intonation, connected speech, pace, pauses, fillers and self-corrections. Judge grammar and vocabulary from what was actually said.
-Task:\n"""${prompt}"""\nBrowser speech-to-text (may contain recognition errors; trust the audio over it):\n"""${ans}"""
+Task:\n"""${prompt}"""\nBrowser speech-to-text (often incomplete or wrong; ALWAYS trust the audio over it and grade the WHOLE recording):\n"""${ans||'(none)'}"""
 Return ONLY JSON: {"heard":"exact transcript of what you hear, keep the learner's mistakes",${outFmt},"pron":[{"word":"word or short phrase","heard":"how the learner said it, rough IPA or description","ipa":"/correct IPA/","tip_vi":"cách sửa cụ thể bằng tiếng Việt: khẩu hình, âm cuối, trọng âm"}] (the 4–10 most important pronunciation problems, most frequent first),"fluency_vi":"2-3 câu nhận xét độ trôi chảy, ngắt nghỉ, ngữ điệu, tốc độ"}`,[{mime:audio.mime,data:audio.data}]);
-          d=parseJSON(t);if(d&&d.noaudio){d=null;aNote='<p class="note">AI chung của web chưa nhận được ghi âm, nên lần này chấm theo chữ nhận được. Dán key Gemini của bạn ở nút <b>⚙ AI</b> để AI nghe ghi âm.</p>';}}catch(e){aNote=`<p class="note">AI chưa nghe được ghi âm (${esc(e.message||e.code||'lỗi')}), nên chấm theo chữ nhận được.</p>`;}}
+          d=parseJSON(t);if(d&&d.heard&&wc(d.heard)>wc(ta.value)){ta.value=d.heard;$('#s-wc').textContent=wc(d.heard)+' từ';}if(d&&d.noaudio){d=null;aNote='<p class="note">AI chung của web chưa nhận được ghi âm, nên lần này chấm theo chữ nhận được. Dán key Gemini của bạn ở nút <b>⚙ AI</b> để AI nghe ghi âm.</p>';}}catch(e){aNote=`<p class="note">AI chưa nghe được ghi âm (${esc(e.message||e.code||'lỗi')}), nên chấm theo chữ nhận được.</p>`;}}
+      if(!d&&wc(ans)<15){$('#s-res').innerHTML=aNote+'<p class="mute">Máy chỉ nhận được '+wc(ans)+' từ nên chưa chấm được theo chữ. Thử chấm lại sau ít phút để AI nghe ghi âm.</p>';$('#s-go').disabled=false;return;}
       if(!d)d=await ask(`${common}
 You only have a speech-to-text transcript: judge Pronunciation/Fluency only from indirect evidence (recognition errors, fillers, repetition, length vs about ${Math.round(card.sec/60)} minutes of speech) and say so briefly. Penalise answers clearly too short.
 Task:\n"""${prompt}"""\nTranscript (${wc(ans)} words):\n"""${ans}"""
