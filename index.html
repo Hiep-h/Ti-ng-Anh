@@ -1499,16 +1499,48 @@ function micHelp(fail){
   return STANDALONE?'Trình duyệt này không nhận giọng nói. Mở web bằng <b>Chrome</b> hoặc <b>Edge</b> trên máy tính, hoặc bấm nút micro trên bàn phím điện thoại để nói vào ô dưới.'
     :'Micro trong web chỉ chạy khi mở link bằng <b>Chrome hoặc Edge trên máy tính</b> (hoặc app Claude trên máy tính). Trên app Claude điện thoại hay Safari thì chưa hỗ trợ: bấm nút micro trên <b>bàn phím điện thoại</b> để nói vào ô dưới (đừng sửa lỗi ngữ pháp).';
 }
-let mrec=null,mstream=null,mchunks=[];
+let mrec=null,mstream=null,mchunks=[],mclips=[];
+/* ghi âm: mỗi lần bấm 🎙 là 1 đoạn; khi chấm, các đoạn được ghép thành 1 file WAV gửi AI nghe */
 async function recStart(){
   if(!STANDALONE||!navigator.mediaDevices||!window.MediaRecorder)return;
-  try{mstream=await navigator.mediaDevices.getUserMedia({audio:true});mchunks=[];mrec=new MediaRecorder(mstream);
+  try{mstream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});mchunks=[];mrec=new MediaRecorder(mstream);
     mrec.ondataavailable=e=>{if(e.data&&e.data.size)mchunks.push(e.data);};
-    mrec.onstop=()=>{const box=$('#s-rec');if(box&&mchunks.length){const url=URL.createObjectURL(new Blob(mchunks,{type:mrec.mimeType||'audio/webm'}));box.innerHTML=`<p class="mute" style="margin:8px 0 4px">Nghe lại giọng của bạn để tự sửa phát âm:</p><audio controls src="${url}" style="width:100%"></audio>`;}
-      if(mstream)mstream.getTracks().forEach(t=>t.stop());mstream=null;};
-    mrec.start();}catch(e){}
+    mrec.onstop=()=>{if(mchunks.length)mclips.push(new Blob(mchunks,{type:mrec.mimeType||'audio/webm'}));mchunks=[];
+      if(mstream)mstream.getTracks().forEach(t=>t.stop());mstream=null;showRec();};
+    mrec.start(1000);}catch(e){}
 }
 function recStop(){try{if(mrec&&mrec.state==='recording')mrec.stop();}catch(e){}}
+const recDone=()=>new Promise(r=>{if(mrec&&mrec.state==='recording'){const o=mrec.onstop;mrec.onstop=e=>{o&&o(e);r();};recStop();}else r();});
+async function clipsPCM(rate){
+  const AC=window.AudioContext||window.webkitAudioContext;if(!AC||!mclips.length)return null;const ac=new AC();const segs=[];
+  try{for(const b of mclips){try{const buf=await ac.decodeAudioData(await b.arrayBuffer());
+      const off=new OfflineAudioContext(1,Math.ceil(buf.duration*rate),rate);const src=off.createBufferSource();src.buffer=buf;src.connect(off.destination);src.start();
+      segs.push((await off.startRendering()).getChannelData(0));}catch(e){}}}finally{try{ac.close()}catch(e){}}
+  if(!segs.length)return null;const gap=new Float32Array(Math.round(rate*0.4)),parts=[];segs.forEach((s,i)=>{if(i)parts.push(gap);parts.push(s);});
+  const n=parts.reduce((a,p)=>a+p.length,0),out=new Float32Array(n);let o=0;for(const p of parts){out.set(p,o);o+=p.length;}return out;
+}
+function wavBlob(pcm,rate){const b=new ArrayBuffer(44+pcm.length*2),v=new DataView(b),w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+pcm.length*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,pcm.length*2,true);
+  let peak=0;for(let i=0;i<pcm.length;i++)peak=Math.max(peak,Math.abs(pcm[i]));const g=peak>0.02&&peak<0.5?0.9/peak:1;
+  for(let i=0;i<pcm.length;i++){const x=Math.max(-1,Math.min(1,pcm[i]*g));v.setInt16(44+i*2,x<0?x*0x8000:x*0x7fff,true);}return new Blob([b],{type:'audio/wav'});}
+async function recWav(){let rate=16000,pcm=await clipsPCM(rate);if(!pcm)return null;
+  if(pcm.length/rate>360)pcm=pcm.slice(0,rate*360);   /* tối đa 6 phút */
+  if(pcm.length/rate>240){rate=11025;pcm=await clipsPCM(rate);pcm=pcm.slice(0,rate*360);}
+  return {blob:wavBlob(pcm,rate),sec:Math.round(pcm.length/rate)};}
+const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(b);});
+async function showRec(){const box=$('#s-rec');if(!box||!mclips.length)return;try{const w=await recWav();if(!w)return;
+  box.innerHTML=`<p class="mute" style="margin:8px 0 4px">Ghi âm bài nói của bạn (${w.sec} giây${mclips.length>1?', '+mclips.length+' đoạn':''}). Khi chấm, AI sẽ nghe bản này để nhận xét phát âm:</p><audio controls src="${URL.createObjectURL(w.blob)}" style="width:100%"></audio><button class="btn sm ghost" id="s-rec-clr" style="margin-top:4px">Xoá ghi âm, nói lại từ đầu</button>`;
+  $('#s-rec-clr').onclick=()=>{mclips=[];box.innerHTML='';const t=$('#s-ans');if(t){t.value='';t.dispatchEvent(new Event('input'));}};}catch(e){}}
+function sayEn(t,rate){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-US';u.rate=rate||0.85;const v=speechSynthesis.getVoices().find(v=>/^en(-|_)US/i.test(v.lang))||speechSynthesis.getVoices().find(v=>/^en/i.test(v.lang));if(v)u.voice=v;speechSynthesis.speak(u);}catch(e){}}
+function speakExtraHTML(d){
+  const p=(d.pron||[]).filter(x=>x&&x.word);
+  return `${d.heard?`<h4>AI nghe được bạn nói</h4><p class="mute" style="font-size:14px">${esc(d.heard)}</p>`:''}
+  ${p.length?`<h4>Lỗi phát âm (${p.length})</h4>${p.map(x=>`<div class="err"><b>${esc(x.word)}</b> <button class="btn sm ghost" data-say="${esc(x.word)}" title="Nghe phát âm đúng">🔊</button> <span class="mute">bạn đọc gần như: ${esc(x.heard||'?')}</span> → <ins>${esc(x.ipa||'')}</ins><div class="mute">${esc(x.tip_vi||'')}</div></div>`).join('')}`:''}
+  ${d.fluency_vi?`<h4>Độ trôi chảy, ngữ điệu</h4><p>${esc(d.fluency_vi)}</p>`:''}
+  ${d.fixed?`<h4>Bài nói của bạn sau khi sửa lỗi</h4><div class="ptext" style="white-space:pre-wrap">${esc(d.fixed)}</div><button class="btn sm ghost" data-say="${esc(d.fixed)}" style="margin-top:4px">🔊 Nghe đọc mẫu</button>`:''}
+  ${d.model?`<h4>Gợi ý câu trả lời tốt hơn cho đề này</h4><div class="ptext" style="white-space:pre-wrap">${esc(d.model)}</div><button class="btn sm ghost" data-say="${esc(d.model)}" style="margin-top:4px">🔊 Nghe đọc mẫu</button>`:''}`;
+}
+
 async function openSpeak(card,givenPrompt){
   await ready;const body=openRoom(card.part==='pt'?'Test đầu vào – Nói':card.part==='a'?`Nói A1–A2: ${card.title}`:`VSTEP Speaking ${card.lab}: ${card.title}`);let prompt=givenPrompt;
   try{
@@ -1530,7 +1562,7 @@ async function openSpeak(card,givenPrompt){
   const tabs=body.querySelectorAll('.rtabs button');tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));$('#pl').classList.toggle('hide-m',b.dataset.p!=='l');$('#pr').classList.toggle('hide-m',b.dataset.p!=='r');});
   const ta=$('#s-ans');ta.oninput=()=>$('#s-wc').textContent=wc(ta.value)+' từ';
   if($('#s-prep'))$('#s-prep').onclick=()=>startClock(card.prep,()=>{$('#s-mic').click();});
-  let userStop=false,resumes=0;
+  let userStop=false,resumes=0;mclips=[];
   const stopMic=()=>{userStop=true;if(dict)dict.stop().catch(()=>{});recStop();};
   roomClose=()=>{if(listening)stopMic();recStop(true);};
   let finals='',bound=false;
@@ -1556,19 +1588,32 @@ async function openSpeak(card,givenPrompt){
   const go=async()=>{
     const ans=ta.value.trim();if(wc(ans)<15){$('#s-res').innerHTML='<p class="mute">Bài nói quá ngắn để chấm.</p>';return}
     if(listening)stopMic();stopClock();$('#s-go').disabled=true;$('#s-res').innerHTML=spin('Đang chấm…');
+    await recDone();let audio=null,aNote='';
+    if(STANDALONE&&mclips.length){if(typeof apiOn==='function'&&apiOn()){try{$('#s-res').innerHTML=spin('Đang chuẩn bị ghi âm cho AI nghe…');const w=await recWav();if(w&&w.sec>=5)audio={mime:'audio/wav',data:await blobB64(w.blob),sec:w.sec};}catch(e){}}
+      else aNote='<p class="note">Muốn AI <b>nghe ghi âm</b> và chỉ ra lỗi phát âm từng từ thì bấm <b>⚙ AI</b> và dán key Gemini. Lần này AI chỉ chấm theo chữ nhận được.</p>';}
     const vstep=card.part.startsWith('v'),basic=card.part==='a'||card.part==='pt';
     const rubric=card.part==='pt'?`You are a calibrated English speaking assessor placing a learner on the CEFR scale. Rate this answer on the 5 VSTEP speaking criteria, each 0-10 with VSTEP-style calibration (B1≈4-5.5, B2≈6-8, C1≈8.5+): Ngữ pháp (Grammar), Từ vựng (Vocabulary), Phát âm (Pronunciation), Độ trôi chảy (Fluency), Tổ chức ý (Discourse). overall = mean rounded to 0.5. level = the single most likely CEFR level: exactly one of A1, A2, B1, B2, C1.`:basic?`You are a kind but honest assessor for A1–A2 English learners. Rate this spoken answer on 4 criteria, each 0-10 relative to a strong A2 performance: Trả lời đúng câu hỏi (Task), Từ vựng (Vocabulary), Ngữ pháp (Grammar), Độ trôi chảy (Fluency). overall = mean rounded to 0.5. level = estimated CEFR (A1, A1–A2, A2, A2–B1, B1). Keep comments simple.`:vstep?S_VSTEP(card.part)
       :`You are a calibrated ETS TOEIC Speaking rater. Rate this Q11 opinion response 0-5 (ETS). Criteria on 0-5; overall "x/5"; level = CEFR.`;
     try{
-      const d=await ask(`${rubric}${vstep?calibBlock('speak',card.part):''}${await guideBlock('speak')}
+      const common=`${rubric}${vstep?calibBlock('speak',card.part):''}${await guideBlock('speak')}`;
+      const outFmt=`"criteria":[{"name":"Tiếng Việt (English)","score":number,"comment_vi":string}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":"exact words the learner said","correction":string,"explain_vi":"vì sao sai, dùng thế nào cho đúng","cat":"tense|agreement|article|preposition|word form|word choice|collocation|sentence structure|linking/coherence|plural|other"}] (all real grammar and word-choice errors, up to 10),"improve_vi":["3 việc cụ thể kèm 2–3 cụm từ tiếng Anh nên dùng cho đề này"],"fixed":"the learner's own answer rewritten with every grammar, vocabulary and phrasing error corrected, keeping their ideas and length","model":"a better answer to THIS task at about one CEFR level above the learner, natural spoken English, similar length, reusing their good ideas"`;
+      let d=null;
+      if(audio){$('#s-res').innerHTML=spin(`AI đang nghe ${audio.sec} giây ghi âm và chấm… (khoảng 30–60 giây)`);
+        try{const t=await aiApi(`${common}
+You are LISTENING to the attached audio recording of the candidate's spoken answer (Vietnamese learner of English). Judge Pronunciation and Fluency from the audio itself: individual sounds (e.g. final consonants dropped, /θ ð/, /ʃ s/, /v w/, /l n/, short vs long vowels), word stress, sentence stress and intonation, connected speech, pace, pauses, fillers and self-corrections. Judge grammar and vocabulary from what was actually said.
+Task:\n"""${prompt}"""\nBrowser speech-to-text (may contain recognition errors; trust the audio over it):\n"""${ans}"""
+Return ONLY JSON: {"heard":"exact transcript of what you hear, keep the learner's mistakes",${outFmt},"pron":[{"word":"word or short phrase","heard":"how the learner said it, rough IPA or description","ipa":"/correct IPA/","tip_vi":"cách sửa cụ thể bằng tiếng Việt: khẩu hình, âm cuối, trọng âm"}] (the 4–10 most important pronunciation problems, most frequent first),"fluency_vi":"2-3 câu nhận xét độ trôi chảy, ngắt nghỉ, ngữ điệu, tốc độ"}`,[{mime:audio.mime,data:audio.data}]);
+          d=parseJSON(t);}catch(e){aNote=`<p class="note">AI chưa nghe được ghi âm (${esc(e.message||e.code||'lỗi')}), nên chấm theo chữ nhận được.</p>`;}}
+      if(!d)d=await ask(`${common}
 You only have a speech-to-text transcript: judge Pronunciation/Fluency only from indirect evidence (recognition errors, fillers, repetition, length vs about ${Math.round(card.sec/60)} minutes of speech) and say so briefly. Penalise answers clearly too short.
 Task:\n"""${prompt}"""\nTranscript (${wc(ans)} words):\n"""${ans}"""
-Return ONLY JSON: {"criteria":[{"name":"Tiếng Việt (English)","score":number,"comment_vi":string}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":string,"correction":string,"explain_vi":string,"cat":"tense|agreement|article|preposition|word form|word choice|collocation|sentence structure|punctuation/spelling|linking/coherence|plural|other"}] (up to 6),"improve_vi":["3 việc cụ thể kèm 2–3 cụm từ tiếng Anh nên dùng cho đề này"]}`,'complex');
+Return ONLY JSON: {${outFmt}}`,'complex');
       const calNote=vstep?calibApply('speak',d):'';try{logErrors('Nói',d.errors);}catch(e){}
       if(basic){d.overall=round05(+d.overall);addHist(card.part==='pt'?'Test đầu vào':'Nói A1–A2',d.overall,card.part==='pt'?'Test đầu vào: Nói':'Nói A1–A2: '+card.title);if(card.onResult)card.onResult(d);}
       else if(vstep){d.overall=round05(+d.overall);state.last['VSTEP Nói']=d.overall;addHist('VSTEP Nói '+card.lab,d.overall,`Speaking ${card.lab}: ${card.title}`);}
       else addHist('TOEIC Nói Q11',String(d.overall),'TOEIC Speaking Q11');
-      $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${gradeHTML(d,vstep||basic?'/10':'',calNote)}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
+      $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${aNote}${gradeHTML(d,vstep||basic?'/10':'',calNote+(audio&&d.pron?'<p class="mute">AI đã nghe ghi âm của bạn để chấm phát âm.</p>':''))}${speakExtraHTML(d)}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
+      $('#s-res').querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>sayEn(b.dataset.say,b.dataset.say.length>40?0.95:0.8));
       $('#s-res').scrollIntoView({behavior:'smooth'});
     }catch(e){$('#s-res').innerHTML=`<p class="mute">${errMsg(e)}</p>`;$('#s-go').disabled=false;}
   };

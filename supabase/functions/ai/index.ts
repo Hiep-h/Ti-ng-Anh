@@ -35,9 +35,9 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return json({ error: "bad" }, 400); }
   const prompt = String(body.prompt || "").slice(0, 80000);
   if (!prompt) return json({ error: "bad" }, 400);
-  // Ảnh trang tài liệu (base64 JPEG/PNG), tối đa 20 ảnh
+  // Ảnh trang tài liệu (base64 JPEG/PNG) hoặc ghi âm bài nói (WAV), tối đa 20 tệp
   const images = (Array.isArray(body.images) ? body.images : [])
-    .filter((i) => i && typeof i.data === "string" && /^image\/(jpeg|png|webp)$/.test(String(i.mime)))
+    .filter((i) => i && typeof i.data === "string" && /^(image\/(jpeg|png|webp)|audio\/(wav|mpeg|mp3|ogg|flac|aac))$/.test(String(i.mime)))
     .slice(0, 20);
   const parts: unknown[] = [{ text: prompt }, ...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))];
 
