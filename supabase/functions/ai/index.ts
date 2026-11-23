@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("GEMINI_API_KEY");
   if (!key) return json({ error: "nokey" }, 500);
 
-  let body: { prompt?: string; images?: { mime?: string; data?: string }[] };
+  let body: { prompt?: string; images?: { mime?: string; data?: string }[]; schema?: unknown };
   try { body = await req.json(); } catch { return json({ error: "bad" }, 400); }
   const prompt = String(body.prompt || "").slice(0, 80000);
   if (!prompt) return json({ error: "bad" }, 400);
@@ -48,6 +48,8 @@ Deno.serve(async (req) => {
     const t1 = Date.now();
     const gen: Record<string, unknown> = { temperature: 0.8, maxOutputTokens: 32768 };
     if (think) gen.thinkingConfig = { thinkingLevel: "low" };
+    // Khuôn JSON bắt buộc (vd. kết quả chấm Nói) để AI luôn trả đúng dạng
+    if (body.schema && typeof body.schema === "object") { gen.responseMimeType = "application/json"; gen.responseSchema = body.schema; gen.temperature = 0.4; }
     try {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
         method: "POST",

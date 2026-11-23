@@ -893,13 +893,13 @@ let apiNote='';
 const GMODELS=['gemini-3.5-flash','gemini-3.5-flash-lite','gemini-flash-latest'];
 function myKey(){const k=lsGet('vstep-gkey');return typeof k==='string'&&/^AIza[\w-]{20,}$/.test(k)?k:'';}
 function serverAiOk(){return !!(STANDALONE&&supa&&acct&&lsGet('vstep-srvai')!==0);}
-async function geminiDirect(prompt,images,key){
+async function geminiDirect(prompt,images,key,schema){
   const parts=[{text:prompt},...(images||[]).map(i=>({inline_data:{mime_type:i.mime,data:i.data}}))];
   const t0=Date.now();let last='quota',detail='';
   for(const m of GMODELS){
     for(let a=0;a<2;a++){
       if(Date.now()-t0>240000){last='timeout';break;}
-      const call=async think=>{const gen={temperature:0.8,maxOutputTokens:32768};if(think)gen.thinkingConfig={thinkingLevel:'low'};
+      const call=async think=>{const gen={temperature:schema?0.4:0.8,maxOutputTokens:32768};if(think)gen.thinkingConfig={thinkingLevel:'low'};if(schema){gen.responseMimeType='application/json';gen.responseSchema=schema;}
         try{return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{role:'user',parts}],generationConfig:gen}),signal:AbortSignal.timeout(180000)});}catch(e){return null;}};
       let r=await call(true);
       if(r&&r.status===400){const t=await r.clone().text();if(/thinking/i.test(t))r=await call(false);}
@@ -949,10 +949,10 @@ function openAiSettings(){
     catch(e){msg(esc(e.message||'Key không dùng được.'));}finally{b.disabled=false;}};
 }
 function apiOn(){return !!(STANDALONE&&(myKey()||serverAiOk())&&lsGet('vstep-api')!==0&&!(lsGet('vstep-api-off-until')>Date.now()));}
-async function aiApi(prompt,images){
-  const k=myKey();if(k)return geminiDirect(prompt,images,k);
+async function aiApi(prompt,images,schema){
+  const k=myKey();if(k)return geminiDirect(prompt,images,k,schema);
   if(!serverAiOk())throw{code:'nokey',message:'Chưa có key Gemini'};
-  const{data,error}=await supa.functions.invoke('ai',{body:images&&images.length?{prompt,images}:{prompt}});
+  const{data,error}=await supa.functions.invoke('ai',{body:Object.assign({prompt},images&&images.length?{images}:{},schema?{schema}:{})});
   if(error){let st=error.context&&error.context.status,b={};try{b=await error.context.json();}catch(e){}
     const tm=st===546||st===504||b.error==='timeout';
     if(st===403||b.error==='notallowed')throw{code:'notallowed',message:'AI chung của web chỉ dành cho chủ web. Hãy dán key Gemini của bạn.'};
@@ -1533,6 +1533,30 @@ async function showRec(){const box=$('#s-rec');if(!box||!mclips.length)return;tr
   box.innerHTML=`<p class="mute" style="margin:8px 0 4px">Ghi âm bài nói của bạn (${w.sec} giây${mclips.length>1?', '+mclips.length+' đoạn':''}). Khi chấm, AI sẽ nghe bản này để nhận xét phát âm:</p><audio controls src="${URL.createObjectURL(w.blob)}" style="width:100%"></audio><button class="btn sm ghost" id="s-rec-clr" style="margin-top:4px">Xoá ghi âm, nói lại từ đầu</button>`;
   $('#s-rec-clr').onclick=()=>{mclips=[];box.innerHTML='';const t=$('#s-ans');if(t){t.value='';t.dispatchEvent(new Event('input'));}};}catch(e){}}
 function sayEn(t,rate){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-US';u.rate=rate||0.85;const v=speechSynthesis.getVoices().find(v=>/^en(-|_)US/i.test(v.lang))||speechSynthesis.getVoices().find(v=>/^en/i.test(v.lang));if(v)u.voice=v;speechSynthesis.speak(u);}catch(e){}}
+const S_=(t,o)=>Object.assign({type:t},o||{});
+function speakSchema(withAudio){
+  const p={criteria:S_('ARRAY',{items:S_('OBJECT',{properties:{name:S_('STRING'),score:S_('NUMBER'),comment_vi:S_('STRING')},required:['name','score','comment_vi']})}),
+    overall:S_('NUMBER'),level:S_('STRING'),strengths_vi:S_('STRING'),
+    errors:S_('ARRAY',{items:S_('OBJECT',{properties:{original:S_('STRING'),correction:S_('STRING'),explain_vi:S_('STRING'),cat:S_('STRING')},required:['original','correction','explain_vi','cat']})}),
+    improve_vi:S_('ARRAY',{items:S_('STRING')}),fixed:S_('STRING'),model:S_('STRING')};
+  const req=['criteria','overall','level','strengths_vi','errors','improve_vi','fixed','model'];
+  if(withAudio){p.heard=S_('STRING');p.fluency_vi=S_('STRING');p.pron=S_('ARRAY',{items:S_('OBJECT',{properties:{word:S_('STRING'),heard:S_('STRING'),ipa:S_('STRING'),tip_vi:S_('STRING')},required:['word','heard','ipa','tip_vi']})});req.unshift('heard');req.push('pron','fluency_vi');}
+  return S_('OBJECT',{properties:p,required:req});
+}
+/* chuẩn hoá kết quả chấm; trả null nếu AI trả sai dạng */
+function normGrade(d,numeric){
+  if(Array.isArray(d))d=d.find(x=>x&&typeof x==='object');
+  if(!d||typeof d!=='object')return null;
+  if(!Array.isArray(d.criteria)&&d.overall==null){const inner=Object.values(d).find(v=>v&&typeof v==='object'&&!Array.isArray(v)&&(Array.isArray(v.criteria)||v.overall!=null));if(inner)d=Object.assign({},d,inner);}
+  const num=v=>{if(typeof v==='number')return v;const m=String(v==null?'':v).replace(',','.').match(/-?\d+(\.\d+)?/);return m?parseFloat(m[0]):NaN;};
+  d.criteria=(Array.isArray(d.criteria)?d.criteria:[]).filter(c=>c&&(c.name||c.criterion)).map(c=>Object.assign({},c,{name:c.name||c.criterion,score:num(c.score)}));
+  ['errors','improve_vi','pron'].forEach(k=>{if(!Array.isArray(d[k]))d[k]=d[k]?[d[k]]:[];});
+  d.errors=d.errors.filter(e=>e&&typeof e==='object'&&(e.original||e.correction));
+  if(numeric){let o=num(d.overall);const sc=d.criteria.map(c=>c.score).filter(x=>isFinite(x));if(!isFinite(o)&&sc.length)o=sc.reduce((a,b)=>a+b,0)/sc.length;if(!isFinite(o))return null;d.overall=o;}
+  else if(d.overall==null||d.overall==='')return null;
+  if(!d.criteria.length&&!d.errors.length&&!d.fixed)return null;
+  return d;
+}
 function speakExtraHTML(d){
   const p=(d.pron||[]).filter(x=>x&&x.word);
   return `${d.heard?`<h4>AI nghe được bạn nói</h4><p class="mute" style="font-size:14px">${esc(d.heard)}</p>`:''}
@@ -1606,16 +1630,28 @@ async function openSpeak(card,givenPrompt){
       const outFmt=`"criteria":[{"name":"Tiếng Việt (English)","score":number,"comment_vi":string}],"overall":${vstep||basic?'number':'string'},"level":string,"strengths_vi":string,"errors":[{"original":"exact words the learner said","correction":string,"explain_vi":"vì sao sai, dùng thế nào cho đúng","cat":"tense|agreement|article|preposition|word form|word choice|collocation|sentence structure|linking/coherence|plural|other"}] (all real grammar and word-choice errors, up to 10),"improve_vi":["3 việc cụ thể kèm 2–3 cụm từ tiếng Anh nên dùng cho đề này"],"fixed":"the learner's own answer rewritten with every grammar, vocabulary and phrasing error corrected, keeping their ideas and length","model":"a better answer to THIS task at about one CEFR level above the learner, natural spoken English, similar length, reusing their good ideas"`;
       let d=null;
       if(audio){$('#s-res').innerHTML=spin(`AI đang nghe ${audio.sec} giây ghi âm và chấm… (khoảng 30–60 giây)`);
-        try{const t=await aiApi(`${common}
-IMPORTANT: if NO audio file is attached to this message, return ONLY {"noaudio":true}. Otherwise: you are LISTENING to the attached audio recording of the candidate's spoken answer (Vietnamese learner of English). Judge Pronunciation and Fluency from the audio itself: individual sounds (e.g. final consonants dropped, /θ ð/, /ʃ s/, /v w/, /l n/, short vs long vowels), word stress, sentence stress and intonation, connected speech, pace, pauses, fillers and self-corrections. Judge grammar and vocabulary from what was actually said.
+        const aPrompt=`${common}
+You are LISTENING to the attached audio recording of the candidate's spoken answer (Vietnamese learner of English). Judge Pronunciation and Fluency from the audio itself: individual sounds (e.g. final consonants dropped, /θ ð/, /ʃ s/, /v w/, /l n/, short vs long vowels), word stress, sentence stress and intonation, connected speech, pace, pauses, fillers and self-corrections. Judge grammar and vocabulary from what was actually said.
 Task:\n"""${prompt}"""\nBrowser speech-to-text (often incomplete or wrong; ALWAYS trust the audio over it and grade the WHOLE recording):\n"""${ans||'(none)'}"""
-Return ONLY JSON: {"heard":"exact transcript of what you hear, keep the learner's mistakes",${outFmt},"pron":[{"word":"word or short phrase","heard":"how the learner said it, rough IPA or description","ipa":"/correct IPA/","tip_vi":"cách sửa cụ thể bằng tiếng Việt: khẩu hình, âm cuối, trọng âm"}] (the 4–10 most important pronunciation problems, most frequent first),"fluency_vi":"2-3 câu nhận xét độ trôi chảy, ngắt nghỉ, ngữ điệu, tốc độ"}`,[{mime:audio.mime,data:audio.data}]);
-          d=parseJSON(t);if(d&&d.heard&&wc(d.heard)>wc(ta.value)){ta.value=d.heard;$('#s-wc').textContent=wc(d.heard)+' từ';}if(d&&d.noaudio){d=null;aNote='<p class="note">AI chung của web chưa nhận được ghi âm, nên lần này chấm theo chữ nhận được. Dán key Gemini của bạn ở nút <b>⚙ AI</b> để AI nghe ghi âm.</p>';}}catch(e){aNote=`<p class="note">AI chưa nghe được ghi âm (${esc(e.message||e.code||'lỗi')}), nên chấm theo chữ nhận được.</p>`;}}
+Return ONLY JSON: {"heard":"exact transcript of what you hear, keep the learner's mistakes",${outFmt},"pron":[{"word":"word or short phrase","heard":"how the learner said it, rough IPA or description","ipa":"/correct IPA/","tip_vi":"cách sửa cụ thể bằng tiếng Việt: khẩu hình, âm cuối, trọng âm"}] (the 4–10 most important pronunciation problems, most frequent first),"fluency_vi":"2-3 câu nhận xét độ trôi chảy, ngắt nghỉ, ngữ điệu, tốc độ"}
+All comments and explanations in Vietnamese. overall is a single number${vstep||basic?' from 0 to 10':''}.`;
+        let lastErr='';
+        for(let k=0;k<2&&!d;k++){try{const t=await aiApi(aPrompt,[{mime:audio.mime,data:audio.data}],speakSchema(true));let p=null;try{p=parseJSON(t);}catch(e){}
+            d=normGrade(p,vstep||basic);if(!d){lastErr='AI trả kết quả sai dạng';console.warn('speak grade raw',t);}}
+          catch(e){lastErr=e.message||e.code||'lỗi';if(e.code==='quota'||e.code==='badkey'||e.code==='notallowed')break;}}
+        if(!d)aNote=`<p class="note">AI chưa chấm được từ ghi âm (${esc(lastErr)}), nên chấm theo chữ nhận được.</p>`;
+        try{if(d&&d.heard&&wc(d.heard)>wc(ta.value)){ta.value=d.heard;$('#s-wc').textContent=wc(d.heard)+' từ';}if(d&&d.noaudio){d=null;aNote='<p class="note">AI chung của web chưa nhận được ghi âm, nên lần này chấm theo chữ nhận được. Dán key Gemini của bạn ở nút <b>⚙ AI</b> để AI nghe ghi âm.</p>';}}catch(e){aNote=`<p class="note">AI chưa nghe được ghi âm (${esc(e.message||e.code||'lỗi')}), nên chấm theo chữ nhận được.</p>`;}}
       if(!d&&wc(ans)<15){$('#s-res').innerHTML=aNote+'<p class="mute">Máy chỉ nhận được '+wc(ans)+' từ nên chưa chấm được theo chữ. Thử chấm lại sau ít phút để AI nghe ghi âm.</p>';$('#s-go').disabled=false;return;}
-      if(!d)d=await ask(`${common}
+      const tPrompt=`${common}
 You only have a speech-to-text transcript: judge Pronunciation/Fluency only from indirect evidence (recognition errors, fillers, repetition, length vs about ${Math.round(card.sec/60)} minutes of speech) and say so briefly. Penalise answers clearly too short.
 Task:\n"""${prompt}"""\nTranscript (${wc(ans)} words):\n"""${ans}"""
-Return ONLY JSON: {${outFmt}}`,'complex');
+Return ONLY JSON: {${outFmt}}
+All comments and explanations in Vietnamese. overall is a single number${vstep||basic?' from 0 to 10':''}.`;
+      for(let k=0;k<2&&!d;k++){let p=null;
+        if(STANDALONE&&typeof apiOn==='function'&&apiOn()){try{const t=await aiApi(tPrompt,null,speakSchema(false));try{p=parseJSON(t);}catch(e){}}catch(e){if(k||e.code==='quota')throw e;}}
+        else p=await ask(tPrompt,'complex');
+        d=normGrade(p,vstep||basic);if(!d&&!(STANDALONE&&apiOn()))break;}
+      if(!d)throw{message:'AI trả kết quả chấm sai dạng. Bấm Nộp và chấm lần nữa nhé.'};
       const calNote=vstep?calibApply('speak',d):'';try{logErrors('Nói',d.errors);}catch(e){}
       if(basic){d.overall=round05(+d.overall);addHist(card.part==='pt'?'Test đầu vào':'Nói A1–A2',d.overall,card.part==='pt'?'Test đầu vào: Nói':'Nói A1–A2: '+card.title);if(card.onResult)card.onResult(d);}
       else if(vstep){d.overall=round05(+d.overall);state.last['VSTEP Nói']=d.overall;addHist('VSTEP Nói '+card.lab,d.overall,`Speaking ${card.lab}: ${card.title}`);}
