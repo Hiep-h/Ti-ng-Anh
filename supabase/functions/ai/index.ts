@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
   // Model hết lượt (429) thì thử model kế tiếp; mỗi model có hạn mức miễn phí riêng. Model không tồn tại (404) thì bỏ qua.
   const EXTRA = "gemini-flash-latest,gemini-flash-lite-latest,gemini-2.5-flash,gemini-2.5-flash-lite";
   const models = [...new Set(`${Deno.env.get("GEMINI_MODELS") || DEFAULT_MODELS},${EXTRA}`.split(",").map((s) => s.trim()).filter(Boolean))];
-  let last = "quota";
+  let last = "busy"; // busy = Gemini quá tải (503), quota = hết lượt miễn phí (429)
   // Gọi 1 model; thinking "low" cho nhanh (không hỗ trợ thì gọi lại không có thinkingConfig)
   const call = async (m: string, think: boolean) => {
     const t1 = Date.now();
@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
         if (/thinking/i.test(t)) r = await call(m, false);
       }
       if (!r) { last = "network"; break; }
-      if (r.status === 503 || r.status === 500) { last = "quota"; if (attempt === 0) { await new Promise((z) => setTimeout(z, 1500)); continue; } break; }
+      if (r.status === 503 || r.status === 500) { if (last !== "quota") last = "busy"; if (attempt === 0) { await new Promise((z) => setTimeout(z, 2500)); continue; } break; }
       if (r.status === 429) { last = "quota"; break; }
       if (r.status === 404) { if (last !== "quota") last = "model"; break; }
       const d = await r.json().catch(() => ({}));
@@ -84,5 +84,5 @@ Deno.serve(async (req) => {
     }
     if (last === "timeout") break;
   }
-  return json({ error: last }, last === "quota" ? 429 : last === "timeout" ? 504 : 502);
+  return json({ error: last }, last === "quota" ? 429 : last === "busy" ? 503 : last === "timeout" ? 504 : 502);
 });

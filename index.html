@@ -895,7 +895,7 @@ function myKey(){const k=lsGet('vstep-gkey');return typeof k==='string'&&/^AIza[
 function serverAiOk(){return !!(STANDALONE&&supa&&acct&&lsGet('vstep-srvai')!==0);}
 async function geminiDirect(prompt,images,key,schema){
   const parts=[{text:prompt},...(images||[]).map(i=>({inline_data:{mime_type:i.mime,data:i.data}}))];
-  const t0=Date.now();let last='quota',detail='';
+  const t0=Date.now();let last='busy',detail='';
   for(const m of GMODELS){
     for(let a=0;a<2;a++){
       if(Date.now()-t0>240000){last='timeout';break;}
@@ -904,7 +904,7 @@ async function geminiDirect(prompt,images,key,schema){
       let r=await call(true);
       if(r&&r.status===400){const t=await r.clone().text();if(/thinking/i.test(t))r=await call(false);}
       if(!r){last='network';break;}
-      if(r.status===503||r.status===500){last='quota';if(!a){await new Promise(z=>setTimeout(z,1500));continue;}break;}
+      if(r.status===503||r.status===500){if(last!=='quota')last='busy';if(!a){await new Promise(z=>setTimeout(z,2500));continue;}break;}
       if(r.status===429){last='quota';break;}
       if(r.status===404){if(last!=='quota')last='model';break;}
       const d=await r.json().catch(()=>({}));
@@ -917,7 +917,7 @@ async function geminiDirect(prompt,images,key,schema){
     }
     if(last==='timeout')break;
   }
-  throw{code:last,message:last==='quota'?'Gemini của bạn đã hết lượt miễn phí hoặc đang quá tải':last==='timeout'?'AI xử lý quá lâu':last==='network'?'Không kết nối được Gemini, kiểm tra mạng':detail||'Gemini lỗi'};
+  throw{code:last,message:last==='busy'?'Máy chủ Gemini đang quá tải':last==='quota'?'Gemini của bạn đã hết lượt miễn phí hoặc đang quá tải':last==='timeout'?'AI xử lý quá lâu':last==='network'?'Không kết nối được Gemini, kiểm tra mạng':detail||'Gemini lỗi'};
 }
 async function loadKeyFromAccount(){try{if(!acct||myKey())return;const d=await getDoc('gkey');if(d&&d.k&&/^AIza/.test(d.k))lsSet('vstep-gkey',d.k);}catch(e){}}
 function openAiSettings(){
@@ -956,7 +956,7 @@ async function aiApi(prompt,images,schema){
   if(error){let st=error.context&&error.context.status,b={};try{b=await error.context.json();}catch(e){}
     const tm=st===546||st===504||b.error==='timeout';
     if(st===403||b.error==='notallowed')throw{code:'notallowed',message:'AI chung của web chỉ dành cho chủ web. Hãy dán key Gemini của bạn.'};
-    throw{code:st===429?'quota':st===404?'noapi':st===401?'auth':tm?'timeout':st===413?'big':(b.error||'api'),message:tm?'AI xử lý quá lâu (tài liệu dài hoặc Gemini đang chậm)':st===413?'Tài liệu quá lớn để gửi một lần':b.detail||b.error||(st?`Máy chủ báo lỗi ${st}`:error.message)};}
+    throw{code:st===503||b.error==='busy'?'busy':st===429?'quota':st===404?'noapi':st===401?'auth':tm?'timeout':st===413?'big':(b.error||'api'),message:tm?'AI xử lý quá lâu (tài liệu dài hoặc Gemini đang chậm)':st===413?'Tài liệu quá lớn để gửi một lần':b.detail||b.error||(st?`Máy chủ báo lỗi ${st}`:error.message)};}
   if(!data||!data.text)throw{code:'empty',message:'AI trả về rỗng'};
   if(data.finish==='MAX_TOKENS')throw{code:'cut',message:'Câu trả lời bị cắt'};
   return data.text;
@@ -969,6 +969,7 @@ async function askGPT(prompt,raw){
       try{const t=await aiApi(full);return raw?t.trim():parseJSON(t);}
       catch(e){
         if(e.code==='quota'){lsSet('vstep-api-off-until',Date.now()+(myKey()?15:60)*60*1000);apiNote=(myKey()?'Gemini của bạn đang hết lượt hoặc quá tải (thử lại sau ít phút).':'Gemini miễn phí đã hết lượt tạm thời (thử lại sau khoảng 1 giờ).')+' Lần này làm bằng copy–dán nhé.';break;}
+        if(e.code==='busy'){if(!k){await new Promise(z=>setTimeout(z,4000));continue;}apiNote='Máy chủ Gemini của Google đang quá tải (thường vài phút là hết). Lần này làm bằng copy–dán, hoặc đóng hộp này rồi thử lại sau.';break;}
         if(e.code==='badkey'||e.code==='notallowed'||e.code==='nokey'){apiNote=esc(e.message)+' <a href="#" data-aikey>Dán key Gemini</a>. Lần này làm bằng copy–dán.';break;}
         if(e.code==='noapi'){lsSet('vstep-api-off-until',Date.now()+10*60*1000);apiNote='Chưa cài hàm AI trên Supabase. Lần này làm bằng copy–dán.';break;}
         if(e.code==='auth'){apiNote='Phiên đăng nhập hết hạn, hãy đăng nhập lại để dùng AI tự động.';break;}
@@ -1003,7 +1004,7 @@ async function askGPT(prompt,raw){
     d.querySelector('#g-ok').onclick=()=>{try{const txt=d.querySelector('#g-in').value;if(raw&&!txt.trim())throw{message:'Hãy dán câu trả lời của ChatGPT.'};const v=raw?txt.trim():parseJSON(txt);d.remove();res(v);}catch(e){d.querySelector('#g-err').innerHTML=`<div class="note">${esc(e.message)}</div>`;}};
   });
 }
-function errMsg(e){if(e&&e.code==='cancel')return'Đã huỷ.';if(e&&e.code==='not_granted')return'Bạn chưa cho phép trang dùng AI.';if(e&&e.code==='rate_limited')return'Đang gửi quá nhanh, đợi chút rồi thử lại.';if(e&&(e.code==='quota'||e.message==='quota'))return'Gemini đang hết lượt miễn phí tạm thời (dùng nhiều trong ngày hoặc gửi dồn trong 1 phút). Đợi một lúc rồi thử lại, hoặc dán key Gemini riêng ở nút ⚙ AI.';if(e&&(e.code==='timeout'||e.message==='timeout'))return'AI xử lý quá lâu, thử lại nhé.';return'Lỗi: '+esc(e&&e.message||e);}
+function errMsg(e){if(e&&e.code==='cancel')return'Đã huỷ.';if(e&&e.code==='not_granted')return'Bạn chưa cho phép trang dùng AI.';if(e&&e.code==='rate_limited')return'Đang gửi quá nhanh, đợi chút rồi thử lại.';if(e&&(e.code==='quota'||e.message==='quota'))return'Gemini đang hết lượt miễn phí tạm thời (dùng nhiều trong ngày hoặc gửi dồn trong 1 phút). Đợi một lúc rồi thử lại, hoặc dán key Gemini riêng ở nút ⚙ AI.';if(e&&(e.code==='busy'||e.message==='busy'))return'Máy chủ Gemini của Google đang quá tải (lỗi phía Google, không phải do bạn). Thường chỉ vài phút là hết, bấm chấm lại nhé.';if(e&&(e.code==='timeout'||e.message==='timeout'))return'AI xử lý quá lâu, thử lại nhé.';return'Lỗi: '+esc(e&&e.message||e);}
 
 /* =================== PRACTICE CATALOG =================== */
 const CAT={
@@ -1638,7 +1639,7 @@ All comments and explanations in Vietnamese. overall is a single number${vstep||
         let lastErr='';
         for(let k=0;k<2&&!d;k++){try{const t=await aiApi(aPrompt,[{mime:audio.mime,data:audio.data}],speakSchema(true));let p=null;try{p=parseJSON(t);}catch(e){}
             d=normGrade(p,vstep||basic);if(!d){lastErr='AI trả kết quả sai dạng';console.warn('speak grade raw',t);}}
-          catch(e){lastErr=e.code==='quota'?'Gemini hết lượt tạm thời':e.message||e.code||'lỗi';if(e.code==='quota')throw e;if(e.code==='badkey'||e.code==='notallowed')break;}}
+          catch(e){lastErr=e.code==='quota'?'Gemini hết lượt tạm thời':e.message||e.code||'lỗi';if(e.code==='quota'||e.code==='busy')throw e;if(e.code==='badkey'||e.code==='notallowed')break;}}
         if(!d)aNote=`<p class="note">AI chưa chấm được từ ghi âm (${esc(lastErr)}), nên chấm theo chữ nhận được.</p>`;
         try{if(d&&d.heard&&wc(d.heard)>wc(ta.value)){ta.value=d.heard;$('#s-wc').textContent=wc(d.heard)+' từ';}if(d&&d.noaudio){d=null;aNote='<p class="note">AI chung của web chưa nhận được ghi âm, nên lần này chấm theo chữ nhận được. Dán key Gemini của bạn ở nút <b>⚙ AI</b> để AI nghe ghi âm.</p>';}}catch(e){aNote=`<p class="note">AI chưa nghe được ghi âm (${esc(e.message||e.code||'lỗi')}), nên chấm theo chữ nhận được.</p>`;}}
       if(!d&&wc(ans)<15){$('#s-res').innerHTML=aNote+'<p class="mute">Máy chỉ nhận được '+wc(ans)+' từ nên chưa chấm được theo chữ. Thử chấm lại sau ít phút để AI nghe ghi âm.</p>';$('#s-go').disabled=false;return;}
@@ -1648,7 +1649,7 @@ Task:\n"""${prompt}"""\nTranscript (${wc(ans)} words):\n"""${ans}"""
 Return ONLY JSON: {${outFmt}}
 All comments and explanations in Vietnamese. overall is a single number${vstep||basic?' from 0 to 10':''}.`;
       for(let k=0;k<2&&!d;k++){let p=null;
-        if(STANDALONE&&typeof apiOn==='function'&&apiOn()){try{const t=await aiApi(tPrompt,null,speakSchema(false));try{p=parseJSON(t);}catch(e){}}catch(e){if(k||e.code==='quota')throw e;}}
+        if(STANDALONE&&typeof apiOn==='function'&&apiOn()){try{const t=await aiApi(tPrompt,null,speakSchema(false));try{p=parseJSON(t);}catch(e){}}catch(e){if(k||e.code==='quota'||e.code==='busy')throw e;}}
         else p=await ask(tPrompt,'complex');
         d=normGrade(p,vstep||basic);if(!d&&!(STANDALONE&&apiOn()))break;}
       if(!d)throw{message:'AI trả kết quả chấm sai dạng. Bấm Nộp và chấm lần nữa nhé.'};
@@ -1659,8 +1660,8 @@ All comments and explanations in Vietnamese. overall is a single number${vstep||
       $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${aNote}${gradeHTML(d,vstep||basic?'/10':'',calNote+(audio&&d.pron?'<p class="mute">AI đã nghe ghi âm của bạn để chấm phát âm.</p>':''))}${speakExtraHTML(d)}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
       $('#s-res').querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>sayEn(b.dataset.say,b.dataset.say.length>40?0.95:0.8));
       $('#s-res').scrollIntoView({behavior:'smooth'});
-    }catch(e){$('#s-go').disabled=false;const q=e&&(e.code==='quota'||e.message==='quota');
-      if(q)lsSet('vstep-api-off-until',Date.now()+20*60*1000);
+    }catch(e){$('#s-go').disabled=false;const isQ=e&&(e.code==='quota'||e.message==='quota'),q=isQ||e&&(e.code==='busy'||e.message==='busy');
+      if(isQ)lsSet('vstep-api-off-until',Date.now()+20*60*1000);
       $('#s-res').innerHTML=`<p class="note">${errMsg(e)}${q?' Ghi âm và bài nói vẫn được giữ nguyên.':''}</p>${q?`<div class="row" style="margin-top:6px"><button class="btn sm" id="s-again">Chấm lại bằng AI</button><button class="btn sm ghost" id="s-paste">Chấm ngay bằng copy–dán (ChatGPT/Gemini web)</button></div><p class="mute" style="font-size:13px">Copy–dán chỉ chấm theo chữ, không nghe được ghi âm nên không chấm kỹ phát âm.</p>`:''}`;
       const ag=$('#s-again');if(ag)ag.onclick=()=>{lsSet('vstep-api-off-until',0);go();};
       const ps=$('#s-paste');if(ps)ps.onclick=()=>{lsSet('vstep-api-off-until',Date.now()+20*60*1000);go();};}
@@ -1952,7 +1953,7 @@ async function transcribePages(imgs,onp){
   let out='';
   for(let i=0;i<imgs.length;i+=4){const part=imgs.slice(i,i+4);onp&&onp(i+1,Math.min(i+4,imgs.length),imgs.length);
     try{const t=await aiApi(`Transcribe ALL text on these ${part.length} document page images in reading order. Keep the original wording, numbering, options (A–D) and any marked/circled answers or answer keys (write them as "Answer: X"). Join lines broken mid-sentence; separate paragraphs with a blank line. Plain text only, no commentary.`,part.map(u=>({mime:'image/jpeg',data:u.split(',')[1]})));out+=t.trim()+'\n\n';}
-    catch(e){if(e.code==='quota'||e.code==='timeout'||e.code==='api'||e.code==='big'){out+=(await ocrImages(part))+'\n\n';}else throw e;}}
+    catch(e){if(e.code==='quota'||e.code==='busy'||e.code==='timeout'||e.code==='api'||e.code==='big'){out+=(await ocrImages(part))+'\n\n';}else throw e;}}
   return out.trim();
 }
 async function askDoc(prompt,text){
