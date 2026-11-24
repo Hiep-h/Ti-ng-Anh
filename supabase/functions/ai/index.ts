@@ -41,7 +41,9 @@ Deno.serve(async (req) => {
     .slice(0, 20);
   const parts: unknown[] = [{ text: prompt }, ...images.map((i) => ({ inline_data: { mime_type: i.mime, data: i.data } }))];
 
-  const models = (Deno.env.get("GEMINI_MODELS") || DEFAULT_MODELS).split(",").map((s) => s.trim()).filter(Boolean);
+  // Model hết lượt (429) thì thử model kế tiếp; mỗi model có hạn mức miễn phí riêng. Model không tồn tại (404) thì bỏ qua.
+  const EXTRA = "gemini-flash-latest,gemini-flash-lite-latest,gemini-2.5-flash,gemini-2.5-flash-lite";
+  const models = [...new Set(`${Deno.env.get("GEMINI_MODELS") || DEFAULT_MODELS},${EXTRA}`.split(",").map((s) => s.trim()).filter(Boolean))];
   let last = "quota";
   // Gọi 1 model; thinking "low" cho nhanh (không hỗ trợ thì gọi lại không có thinkingConfig)
   const call = async (m: string, think: boolean) => {
@@ -72,7 +74,7 @@ Deno.serve(async (req) => {
       if (!r) { last = "network"; break; }
       if (r.status === 503 || r.status === 500) { last = "quota"; if (attempt === 0) { await new Promise((z) => setTimeout(z, 1500)); continue; } break; }
       if (r.status === 429) { last = "quota"; break; }
-      if (r.status === 404) { last = "model"; break; }
+      if (r.status === 404) { if (last !== "quota") last = "model"; break; }
       const d = await r.json().catch(() => ({}));
       if (!r.ok) return json({ error: "gemini", detail: d?.error?.message || String(r.status) }, 502);
       const c = d.candidates?.[0];
