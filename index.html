@@ -2,6 +2,7 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-cache">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tự học Tiếng Anh</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -328,6 +329,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     <div id="td-plan" style="margin-top:14px"></div>
     <div class="panel" id="td-work" style="display:none"></div>
     <div class="panel" style="padding:4px 18px" id="td-list"></div>
+    <div id="td-past"></div>
   </div>
 </div>
 
@@ -582,6 +584,10 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const STANDALONE=true;
+const BUILD='1795608084';
+/* bản web: có bản mới thì tự tải lại (điện thoại khó bấm Ctrl+F5) */
+function checkNewBuild(){try{if(!STANDALONE||!/^https?:/.test(location.protocol)||BUILD.startsWith('__'))return;fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD='([^']+)'/);if(m&&m[1]!==BUILD&&!document.querySelector('#room:not(.hidden)')){const k='vstep-reloaded-'+m[1];if(!sessionStorage.getItem(k)){sessionStorage.setItem(k,1);location.reload();}}}).catch(()=>{});}catch(e){}}
+setTimeout(checkNewBuild,3000);addEventListener('visibilitychange',()=>{if(!document.hidden)checkNewBuild();});
 /* Tài khoản: điền URL và publishable/anon key của Supabase khi đưa web lên mạng. Để trống = chỉ lưu trên máy. */
 const SUPA_URL='https://cuhuatjgrskpafdebgpb.supabase.co';
 const SUPA_KEY='sb_publishable_05AXEKz3khpGPY4t_8XDzQ_oV3IYBV5';
@@ -707,7 +713,17 @@ function mergeVal(a,b,del,pk){
   if(typeof a==='object'&&typeof b==='object'&&!Array.isArray(a)&&!Array.isArray(b)){const o=Object.assign({},a);for(const k in b)o[k]=mergeVal(a[k],b[k],del,k);return o;}
   return b;
 }
-function mergeStates(older,newer){const del=Object.assign({},older._del||{},newer._del||{});const m=mergeVal(older,newer,del,'');m._del=del;m._t=Math.max(older._t||0,newer._t||0);m.cur=newer.cur||older.cur;return m;}
+function mergeStates(older,newer){const out=mergeStates0(older,newer);try{planMergeFix(older,newer,out);}catch(e){}return out;}
+function mergeStates0(older,newer){const del=Object.assign({},older._del||{},newer._del||{});const m=mergeVal(older,newer,del,'');m._del=del;m._t=Math.max(older._t||0,newer._t||0);m.cur=newer.cur||older.cur;return m;}
+/* tiến độ lộ trình chỉ đi tới: lấy ngày lộ trình xa hơn giữa 2 bản (2 máy, 2 tab, bản web cũ còn mở) */
+function planMergeFix(a,b,m){
+  for(const id in (m.profiles||{})){const A=a.profiles&&a.profiles[id],B=b.profiles&&b.profiles[id],M=m.profiles[id];
+    if(!A||!B||!M)continue;
+    const same=A.plan&&B.plan&&A.plan.days&&B.plan.days&&A.plan.days.length&&JSON.stringify(A.plan.days[0])===JSON.stringify(B.plan.days[0]);
+    if(same&&M.plan){M.plan.cur=Math.max(A.plan.cur||0,B.plan.cur||0);M.plan.lastKey=[A.plan.lastKey||'',B.plan.lastKey||''].sort().pop()||null;}
+    const AD=A.daily&&A.daily.days||{},BD=B.daily&&B.daily.days||{},MD=M.daily&&M.daily.days;if(!MD)continue;
+    for(const k in MD){const x=AD[k],y=BD[k];if(x&&y&&x.planDay!=null&&y.planDay!=null&&x.planDay!==y.planDay)MD[k]=JSON.parse(JSON.stringify(x.planDay>y.planDay?x:y));}}
+}
 const snapState=()=>JSON.parse(JSON.stringify(state));
 function adoptState(m){state=m;['decks','exams','hist','gens'].forEach(k=>state[k]=Array.isArray(state[k])?state[k]:[]);installProfiles();lsSet(LSK(),state);try{renderAll();}catch(e){}}
 async function readRemote(){const r=await Promise.race([db.doc(`data/users/${uid}/state`).get(),new Promise(z=>setTimeout(()=>z('TIMEOUT'),10000))]);if(r==='TIMEOUT')throw 'timeout';return unwrap(r);}
@@ -3241,7 +3257,21 @@ async function renderTodayPlan(){
   $('#td-list').innerHTML=(locked?`<div class="note" style="margin:14px 0 4px">Làm xong <b>Kiểm tra bài cũ</b> để mở bài học hôm nay.</div>`:'')+rows.map((r,i)=>locked&&r.k[0]==='t'?`<div class="grow locked"><span class="bub">${i+1}</span><div><b>${esc(r.title)}</b><div class="mute">Đang khoá. Mở sau khi làm xong kiểm tra bài cũ.</div></div><div class="row"><button class="btn ghost sm" disabled>Đang khoá</button></div></div>`
     :`<div class="grow"><span class="bub ${d.done[r.k]?'on':''}">${i+1}</span><div><b>${esc(r.title)}</b><div class="mute">${esc(r.desc)}${r.extra?' · '+esc(r.extra):''}</div></div><div class="row">${r.btn2?`<button class="btn ghost sm" data-p2="${r.k}">${r.btn2}</button>`:''}${r.btn?`<button class="btn ${d.done[r.k]?'ghost':''} sm" data-p="${r.k}">${d.done[r.k]&&r.k!=='review'&&r.k!=='srs'?'Làm lại':r.btn}</button>`:''}</div></div>`).join('');
   $('#td-list').querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>planAct(b.dataset.p,d,prev,false));
+  renderPastPlan();
   $('#td-list').querySelectorAll('[data-p2]').forEach(b=>b.onclick=()=>planAct(b.dataset.p,d,prev,true));
+}
+/* Bài đã học: các ngày lộ trình trước, mở lại được từ vựng, bài ngữ pháp, bài kỹ năng */
+function renderPastPlan(){
+  const box=$('#td-past');if(!box)return;const p=P(),pl=p.plan,D=p.daily,t=todayKey();
+  if(!pl||!pl.days){box.innerHTML='';return;}
+  const by={};Object.keys(D.days).filter(k=>k<t&&D.days[k].planDay!=null&&!D.days[k].end).sort().forEach(k=>{const x=D.days[k];if(Object.keys(x.done||{}).some(q=>x.done[q]===true)){const o=by[x.planDay];if(o&&JSON.stringify(o[1].tasks)===JSON.stringify(x.tasks))for(const q in o[1].done)if(o[1].done[q]===true&&!x.done[q])x.done[q]=true;by[x.planDay]=[k,x];}});
+  const list=Object.entries(by).sort((a,b)=>b[0]-a[0]);
+  if(!list.length){box.innerHTML='';return;}
+  box.innerHTML=`<div class="panel" style="padding:10px 18px;margin-top:14px"><h3 style="margin:6px 0">Bài đã học (${list.length} ngày)</h3><p class="mute" style="margin:0 0 6px;font-size:13px">Bấm vào từng ngày để xem lại từ vựng, bài ngữ pháp, bài luyện.</p>
+    ${list.map(([pd,[k,x]])=>{const n=x.tasks.length,dn=x.tasks.filter((_,i)=>x.done['t'+i]).length;
+      return `<details style="border-top:1px solid var(--line);padding:6px 0"><summary style="cursor:pointer"><b>Ngày ${+pd+1}: ${esc(x.title||(pl.days[pd]&&pl.days[pd].title_vi)||'')}</b> <span class="mute">· ${k.split('-').reverse().slice(0,2).join('/')} · đã làm ${dn}/${n}${x.rvScore?' · kiểm tra bài cũ '+esc(x.rvScore):''}</span></summary>
+        ${x.tasks.map((y,i)=>`<div class="grow" style="padding:6px 0"><span class="bub ${x.done['t'+i]?'on':''}">${i+1}</span><div><b>${esc(y.type==='tip'?'Hướng dẫn tự luyện':taskLabel(y))}</b>${y.type==='tip'?`<div class="mute">${esc(y.text_vi||'')}</div>`:''}</div>${y.type==='tip'?'':`<div class="row"><button class="btn sm ghost" data-pk="${k}" data-pi="${i}">Xem lại</button></div>`}</div>`).join('')}</details>`;}).join('')}</div>`;
+  box.querySelectorAll('[data-pk]').forEach(b=>b.onclick=()=>{const x=D.days[b.dataset.pk];if(x)planAct('t'+b.dataset.pi,x,null,false);});
 }
 function D_reset(d){const D=P().daily;delete D.days[todayKey()];P().plan.lastKey=null;save();}
 async function planAct(k,d,prev,practice){
