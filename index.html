@@ -584,10 +584,18 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const STANDALONE=true;
-const BUILD='1795619732';
+const BUILD='1795620187';
 /* bản web: có bản mới thì tự tải lại (điện thoại khó bấm Ctrl+F5) */
-function checkNewBuild(){try{if(!STANDALONE||!/^https?:/.test(location.protocol)||BUILD.startsWith('__'))return;fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD='([^']+)'/);if(m&&m[1]!==BUILD&&!document.querySelector('#room:not(.hidden)')){const k='vstep-reloaded-'+m[1];if(!sessionStorage.getItem(k)){sessionStorage.setItem(k,1);location.reload();}}}).catch(()=>{});}catch(e){}}
-setTimeout(checkNewBuild,3000);addEventListener('visibilitychange',()=>{if(!document.hidden)checkNewBuild();});
+let bootT=Date.now();
+function checkNewBuild(){try{if(!STANDALONE||!/^https?:/.test(location.protocol)||BUILD.startsWith('__'))return;
+  fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD='([^']+)'/);if(!m||m[1]===BUILD)return;
+    /* vừa mở trang, chưa làm gì: tải bản mới luôn. Đang học dở: chỉ hiện nút, bạn bấm khi xong bài */
+    const k='vstep-reloaded-'+m[1];if(Date.now()-bootT<8000&&!sessionStorage.getItem(k)){sessionStorage.setItem(k,1);location.reload();return;}
+    if(document.getElementById('upd-bar'))return;const b=document.createElement('div');b.id='upd-bar';
+    b.style.cssText='position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:200;background:var(--ink,#222);color:var(--paper,#fff);padding:10px 14px;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.25);font-size:14px;display:flex;gap:10px;align-items:center;max-width:92vw';
+    b.innerHTML='<span>Web có bản cập nhật mới. Bài đã làm vẫn được lưu, học xong bài đang làm rồi bấm cập nhật.</span><button class="btn sm" id="upd-go">Cập nhật</button><button class="btn sm ghost" id="upd-x" title="Để sau">✕</button>';
+    document.body.appendChild(b);$('#upd-go').onclick=()=>{try{save();}catch(e){}setTimeout(()=>location.reload(),600);};$('#upd-x').onclick=()=>b.remove();}).catch(()=>{});}catch(e){}}
+setTimeout(checkNewBuild,2500);addEventListener('visibilitychange',()=>{if(!document.hidden)checkNewBuild();});setInterval(checkNewBuild,10*60*1000);
 /* Tài khoản: điền URL và publishable/anon key của Supabase khi đưa web lên mạng. Để trống = chỉ lưu trên máy. */
 const SUPA_URL='https://cuhuatjgrskpafdebgpb.supabase.co';
 const SUPA_KEY='sb_publishable_05AXEKz3khpGPY4t_8XDzQ_oV3IYBV5';
