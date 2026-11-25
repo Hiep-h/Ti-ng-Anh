@@ -3173,19 +3173,37 @@ function planOverviewHTML(){
    <h5>Các ngày học</h5><div class="tw"><table>${pl.days.map((d,i)=>`<tr${i===cur?' style="background:var(--ink-2)"':''}><td style="white-space:nowrap">${i<pl.cur?'✓ ':''}Ngày ${i+1}</td><td><b>${esc(d.title_vi)}</b><div class="mute">${d.tasks.map(x=>esc(taskLabel(x))).join(' · ')}</div></td></tr>`).join('')}</table></div>
    <div class="row" style="margin-top:10px"><button class="btn ghost sm" id="pl-redo">Tạo lại lộ trình</button><button class="btn ghost sm" id="pl-retest">Làm lại bài test</button><button class="btn ghost sm" data-go="coach">Hỏi cố vấn AI</button></div></div></details>`;
 }
+/* Lộ trình đi theo ngày học: hôm trước có học (làm ít nhất 1 phần) thì hôm nay sang ngày mới; phần chưa làm được mang sang, không bị kẹt */
+function dayStudied(x){if(!x||!x.done)return false;return Object.keys(x.done).some(k=>(k[0]==='t'||k==='review')&&x.done[k]===true)||!!x.complete;}
+function makePlanDay(pl,t,carryFrom){
+  const D=P().daily;if(pl.cur>=pl.days.length)return D.days[t]={planDay:pl.cur,end:true,tasks:[],words:[],done:{}};
+  const day=pl.days[pl.cur],d={planDay:pl.cur,title:day.title_vi,tasks:clone(day.tasks),words:[],gram:null,done:{},vw:{}};
+  if(carryFrom){const left=carryFrom.tasks.map((x,i)=>({x,i})).filter(o=>!carryFrom.done['t'+o.i]&&!o.x.carry&&['vocab','grammar','skill'].includes(o.x.type)&&!d.tasks.some(y=>JSON.stringify(y)===JSON.stringify(o.x))).slice(0,3);
+    left.forEach(o=>d.tasks.push(Object.assign(clone(o.x),{carry:true})));}
+  const g=day.tasks.find(x=>x.type==='grammar');if(g)d.gram=g.id;
+  return D.days[t]=d;
+}
 async function planDayToday(){
   const p=P(),pl=p.plan,D=p.daily,t=todayKey();let d=D.days[t];
+  /* sửa lộ trình bị kẹt: hôm nay đang lặp lại đúng ngày lộ trình đã học hôm trước và hôm nay chưa làm phần học nào */
+  if(d&&d.planDay!=null&&!d.end&&!Object.keys(d.done||{}).some(k=>k[0]==='t'&&d.done[k]===true)){
+    const before=Object.keys(D.days).filter(k=>k<t&&D.days[k].planDay===d.planDay&&dayStudied(D.days[k])).sort().pop();
+    if(before&&pl.cur===d.planDay){const rv=d.done.review,sc=d.rvScore;pl.cur++;d=makePlanDay(pl,t,D.days[before]);if(rv){d.done.review=true;d.rvScore=sc;}pl.lastKey=t;save();return d;}
+  }
   if(!d||d.planDay==null){
-    const lk=pl.lastKey;if(lk&&lk!==t&&D.days[lk]&&D.days[lk].complete&&D.days[lk].planDay===pl.cur)pl.cur++;
-    const keep=d&&d.done&&d.done.review;
-    if(pl.cur>=pl.days.length){D.days[t]=d={planDay:pl.cur,end:true,tasks:[],words:[],done:{}};}
-    else{const day=pl.days[pl.cur];d=D.days[t]={planDay:pl.cur,title:day.title_vi,tasks:clone(day.tasks),words:[],gram:null,done:{},vw:{}};
-      const g=day.tasks.find(x=>x.type==='grammar');if(g)d.gram=g.id;}
-    if(keep)d.done.review=true;
+    const lk=pl.lastKey,last=lk&&lk!==t&&D.days[lk];let carry=null;
+    if(last&&last.planDay===pl.cur&&dayStudied(last)){pl.cur++;if(!last.complete)carry=last;}
+    const keep=d&&d.done&&d.done.review,sc=d&&d.rvScore;
+    d=makePlanDay(pl,t,carry);
+    if(keep){d.done.review=true;d.rvScore=sc;}
     pl.lastKey=t;save();
   }
   return d;
 }
+function planSkip(){confirmBox('Sang ngày tiếp theo của lộ trình? Phần chưa làm hôm nay sẽ được mang sang.','Sang ngày tiếp',planSkipGo);}
+function planSkipGo(){
+  const p=P(),pl=p.plan,D=p.daily,t=todayKey(),d=D.days[t];if(pl.cur>=pl.days.length)return;
+  const rv=d&&d.done&&d.done.review,sc=d&&d.rvScore;pl.cur++;const nd=makePlanDay(pl,t,d);if(rv){nd.done.review=true;nd.rvScore=sc;}pl.lastKey=t;save();renderToday();}
 async function fillVocabTask(d,i){
   const x=d.tasks[i];d.vw=d.vw||{};if((d.vw[i]||[]).length)return d.vw[i];
   const n=Math.max(x.n||0,wpd(x.level)),picked=[];const ex=new Set((d.words||[]).map(w=>w.join(':')));
@@ -3210,15 +3228,16 @@ async function renderTodayPlan(){
   const rows=[];
   if(prev)rows.push({k:'review',title:'Kiểm tra bài cũ',desc:`Từ mới và ngữ pháp của buổi ${prev[0].split('-').reverse().slice(0,2).join('/')}. Làm trước khi học bài mới.`,btn:'Làm bài kiểm tra',extra:d.done.review&&d.rvScore?`Kết quả: ${d.rvScore}`:''});
   d.tasks.forEach((x,i)=>{const k='t'+i;
-    if(x.type==='vocab'){const have=(d.vw&&d.vw[i]||[]).length;rows.push({k,title:taskLabel(x),desc:(have?`${have} từ đã chọn. Học bằng thẻ nhớ rồi luyện ngay.`:'Bấm để chọn từ (tự tạo bộ từ chủ đề này nếu chưa có).')+(x.min?` · ~${x.min} phút`:''),btn:'Học từ',btn2:have?'Luyện tập':null});}
-    else if(x.type==='grammar'){const g=gramFind(x.id);rows.push({k,title:taskLabel(x),desc:(g?g[3]:'')+(x.min?` · ~${x.min} phút`:''),btn:'Học bài'});}
-    else if(x.type==='skill')rows.push({k,title:taskLabel(x),desc:`Bài luyện kỹ năng${x.min?` · ~${x.min} phút`:''}`,btn:'Làm bài'});
+    const cy=x.carry?' (còn từ hôm trước)':'';if(x.type==='vocab'){const have=(d.vw&&d.vw[i]||[]).length;rows.push({k,title:taskLabel(x)+cy,desc:(have?`${have} từ đã chọn. Học bằng thẻ nhớ rồi luyện ngay.`:'Bấm để chọn từ (tự tạo bộ từ chủ đề này nếu chưa có).')+(x.min?` · ~${x.min} phút`:''),btn:'Học từ',btn2:have?'Luyện tập':null});}
+    else if(x.type==='grammar'){const g=gramFind(x.id);rows.push({k,title:taskLabel(x)+cy,desc:(g?g[3]:'')+(x.min?` · ~${x.min} phút`:''),btn:'Học bài'});}
+    else if(x.type==='skill')rows.push({k,title:taskLabel(x)+cy,desc:`Bài luyện kỹ năng${x.min?` · ~${x.min} phút`:''}`,btn:'Làm bài'});
     else rows.push({k,title:'Hướng dẫn tự luyện',desc:x.text_vi+(x.min?` · ~${x.min} phút`:''),btn:'Đã làm'});
   });
   rows.push({k:'srs',title:`Ôn thẻ đến hạn (${due})`,desc:due?'Thẻ từ đến lịch ôn.':'Không có thẻ nào đến hạn hôm nay.',btn:due?'Ôn ngay':null});
   const locked=!!(prev&&!d.done.review);
   const n=rows.length,dn=rows.filter(r=>d.done[r.k]).length;if(dn===n&&!d.complete){d.complete=true;save();}
-  $('#td-prog').innerHTML=`<b>Ngày ${d.planDay+1}/${pl.days.length}: ${esc(d.title||'')}</b><br>Đã xong <b>${dn}/${n}</b> phần${d.complete?' · <span class="pen" style="font-size:24px">Hoàn thành! Mai học ngày tiếp theo.</span>':''} · Chuỗi ngày học: <b>${streak()}</b>`;
+  $('#td-prog').innerHTML=`<b>Ngày ${d.planDay+1}/${pl.days.length}: ${esc(d.title||'')}</b><br>Đã xong <b>${dn}/${n}</b> phần${d.complete?' · <span class="pen" style="font-size:24px">Hoàn thành!</span>':''} · Chuỗi ngày học: <b>${streak()}</b><br><span class="mute" style="font-size:13px">Hôm nay học ít nhất 1 phần là mai tự sang ngày tiếp theo, phần chưa xong được mang sang.</span> ${d.planDay+1<pl.days.length?'<a href="#" id="pl-skip" style="font-size:13px">Học tiếp ngày sau luôn ▶</a>':''}`;
+  const sk=$('#pl-skip');if(sk)sk.onclick=e=>{e.preventDefault();planSkip();};
   $('#td-list').innerHTML=(locked?`<div class="note" style="margin:14px 0 4px">Làm xong <b>Kiểm tra bài cũ</b> để mở bài học hôm nay.</div>`:'')+rows.map((r,i)=>locked&&r.k[0]==='t'?`<div class="grow locked"><span class="bub">${i+1}</span><div><b>${esc(r.title)}</b><div class="mute">Đang khoá. Mở sau khi làm xong kiểm tra bài cũ.</div></div><div class="row"><button class="btn ghost sm" disabled>Đang khoá</button></div></div>`
     :`<div class="grow"><span class="bub ${d.done[r.k]?'on':''}">${i+1}</span><div><b>${esc(r.title)}</b><div class="mute">${esc(r.desc)}${r.extra?' · '+esc(r.extra):''}</div></div><div class="row">${r.btn2?`<button class="btn ghost sm" data-p2="${r.k}">${r.btn2}</button>`:''}${r.btn?`<button class="btn ${d.done[r.k]?'ghost':''} sm" data-p="${r.k}">${d.done[r.k]&&r.k!=='review'&&r.k!=='srs'?'Làm lại':r.btn}</button>`:''}</div></div>`).join('');
   $('#td-list').querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>planAct(b.dataset.p,d,prev,false));
