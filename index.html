@@ -584,7 +584,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const STANDALONE=true;
-const BUILD='1795608084';
+const BUILD='1795619732';
 /* bản web: có bản mới thì tự tải lại (điện thoại khó bấm Ctrl+F5) */
 function checkNewBuild(){try{if(!STANDALONE||!/^https?:/.test(location.protocol)||BUILD.startsWith('__'))return;fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const BUILD='([^']+)'/);if(m&&m[1]!==BUILD&&!document.querySelector('#room:not(.hidden)')){const k='vstep-reloaded-'+m[1];if(!sessionStorage.getItem(k)){sessionStorage.setItem(k,1);location.reload();}}}).catch(()=>{});}catch(e){}}
 setTimeout(checkNewBuild,3000);addEventListener('visibilitychange',()=>{if(!document.hidden)checkNewBuild();});
@@ -1546,9 +1546,27 @@ async function recWav(){let rate=16000,pcm=await clipsPCM(rate);if(!pcm)return n
   if(pcm.length/rate>240){rate=11025;pcm=await clipsPCM(rate);pcm=pcm.slice(0,rate*360);}
   return {blob:wavBlob(pcm,rate),sec:Math.round(pcm.length/rate)};}
 const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(b);});
+let txDone=0,txBusy=false,noAutoTx=false;
 async function showRec(){const box=$('#s-rec');if(!box||!mclips.length)return;try{const w=await recWav();if(!w)return;
-  box.innerHTML=`<p class="mute" style="margin:8px 0 4px">Ghi âm bài nói của bạn (${w.sec} giây${mclips.length>1?', '+mclips.length+' đoạn':''}). Khi chấm, AI sẽ nghe bản này để nhận xét phát âm:</p><audio controls src="${URL.createObjectURL(w.blob)}" style="width:100%"></audio><button class="btn sm ghost" id="s-rec-clr" style="margin-top:4px">Xoá ghi âm, nói lại từ đầu</button>`;
-  $('#s-rec-clr').onclick=()=>{mclips=[];box.innerHTML='';const t=$('#s-ans');if(t){t.value='';t.dispatchEvent(new Event('input'));}};}catch(e){}}
+  box.innerHTML=`<p class="mute" style="margin:8px 0 4px">Ghi âm bài nói của bạn (${w.sec} giây${mclips.length>1?', '+mclips.length+' đoạn':''}). Khi chấm, AI sẽ nghe bản này để nhận xét phát âm:</p><audio controls src="${URL.createObjectURL(w.blob)}" style="width:100%"></audio><div class="row" style="margin-top:4px">${STANDALONE&&typeof apiOn==='function'&&apiOn()?'<button class="btn sm ghost" id="s-rec-tx">✨ Chép lại chữ chính xác bằng AI</button>':''}<button class="btn sm ghost" id="s-rec-clr">Xoá ghi âm, nói lại từ đầu</button></div><div id="s-tx"></div>`;
+  const txb=$('#s-rec-tx');if(txb)txb.onclick=()=>aiTranscribe(w,true);
+  if(txb&&!noAutoTx&&w.sec>=3&&txDone<mclips.length)aiTranscribe(w,false);
+  $('#s-rec-clr').onclick=()=>{mclips=[];txDone=0;box.innerHTML='';const t=$('#s-ans');if(t){t.value='';t.dispatchEvent(new Event('input'));}};}catch(e){}}
+/* chữ nhận bằng trình duyệt hay sai với giọng Việt: gửi ghi âm cho Gemini chép lại đúng từng từ */
+async function aiTranscribe(w,manual){
+  const st=$('#s-tx'),ta=$('#s-ans');if(!st||!ta||txBusy)return;txBusy=true;const n=mclips.length;
+  st.innerHTML=`<p class="mute" style="margin:6px 0">✨ AI đang nghe ${w.sec} giây ghi âm để chép lại chữ chính xác…</p>`;
+  try{const data=await blobB64(w.blob);
+    const t=await aiApi(`Transcribe this recording of a Vietnamese learner speaking English. Write EXACTLY the English words the speaker says, in order, verbatim: keep their grammar and word-choice mistakes, do not correct, improve, summarise or add anything. Leave out fillers (uh, um, ờ) and Vietnamese words. If a word is unclear, write the English word it sounds closest to. Use normal punctuation and sentence breaks.
+Return ONLY JSON {"text": "..."}`,[{mime:'audio/wav',data}],{type:'OBJECT',properties:{text:{type:'STRING'}},required:['text']});
+    let txt='';try{txt=String(parseJSON(t).text||'').trim();}catch(e){txt=String(t||'').trim();}
+    if(!txt)throw{message:'AI không nghe rõ'};
+    const old=ta.value;ta.value=txt;ta.dispatchEvent(new Event('input'));txDone=n;
+    st.innerHTML=`<p class="mute" style="margin:6px 0">✓ Đã thay bằng chữ AI nghe được từ ghi âm (chính xác hơn chữ trình duyệt tự nhận). <a href="#" id="s-tx-undo">Dùng lại chữ cũ</a></p>`;
+    $('#s-tx-undo').onclick=e=>{e.preventDefault();ta.value=old;ta.dispatchEvent(new Event('input'));st.innerHTML='';};}
+  catch(e){st.innerHTML=`<p class="mute" style="margin:6px 0">${manual?errMsg(e):'Chưa chép lại được bằng AI ('+esc(e.code==='busy'?'Gemini đang quá tải':e.code==='quota'?'Gemini hết lượt tạm thời':e.message||'lỗi')+'). Không sao, khi chấm AI vẫn nghe ghi âm.'}</p>`;}
+  finally{txBusy=false;}
+}
 function sayEn(t,rate){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-US';u.rate=rate||0.85;const v=speechSynthesis.getVoices().find(v=>/^en(-|_)US/i.test(v.lang))||speechSynthesis.getVoices().find(v=>/^en/i.test(v.lang));if(v)u.voice=v;speechSynthesis.speak(u);}catch(e){}}
 const S_=(t,o)=>Object.assign({type:t},o||{});
 function speakSchema(withAudio){
@@ -1604,7 +1622,7 @@ async function openSpeak(card,givenPrompt){
   const tabs=body.querySelectorAll('.rtabs button');tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));$('#pl').classList.toggle('hide-m',b.dataset.p!=='l');$('#pr').classList.toggle('hide-m',b.dataset.p!=='r');});
   const ta=$('#s-ans');ta.oninput=()=>$('#s-wc').textContent=wc(ta.value)+' từ';
   if($('#s-prep'))$('#s-prep').onclick=()=>startClock(card.prep,()=>{$('#s-mic').click();});
-  let userStop=false,resumes=0,clockOn=false;mclips=[];
+  let userStop=false,resumes=0,clockOn=false;mclips=[];txDone=0;noAutoTx=false;
   const stopMic=()=>{userStop=true;clockOn=false;if(dict)Promise.resolve(dict.stop()).catch(()=>{});recStop();$('#s-mic').textContent='🎙 Nói tiếp';};
   roomClose=()=>{if(listening)stopMic();recStop(true);};
   let finals='',bound=false;
@@ -1612,6 +1630,7 @@ async function openSpeak(card,givenPrompt){
   $('#s-mic').onclick=()=>{
     if(!dict){ta.focus();startClock(card.sec,()=>{});micSt('warn',micHelp(true));return;}
     if(listening||isRec()){stopMic();return;}
+    noAutoTx=false;
     finals=ta.value?ta.value.trimEnd()+' ':'';userStop=false;resumes=0;
     const p=dict.start();   /* gọi ngay trong cú bấm để trình duyệt hỏi quyền micro */
     recStart();
@@ -1631,7 +1650,7 @@ async function openSpeak(card,givenPrompt){
       else micSt('warn','Không bật được micro'+(e&&e.code?` (${esc(e.code)})`:'')+'. '+micHelp(true));});
   };
   const go=async()=>{
-    if(listening||isRec())stopMic();stopClock();await recDone();
+    noAutoTx=true;if(listening||isRec())stopMic();stopClock();await recDone();
     const ans=ta.value.trim(),canHear=STANDALONE&&mclips.length&&typeof apiOn==='function'&&apiOn();
     if(!canHear&&wc(ans)<15){$('#s-res').innerHTML='<p class="mute">Bài nói quá ngắn để chấm (máy mới nhận được '+wc(ans)+' từ). Bấm 🎙 Nói tiếp để nói thêm.</p>';return}
     $('#s-go').disabled=true;$('#s-res').innerHTML=spin('Đang chấm…');
