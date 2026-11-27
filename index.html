@@ -585,7 +585,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const STANDALONE=true;
-const BUILD='1795783283';
+const BUILD='1795792410';
 /* bản web: có bản mới thì tự tải lại (điện thoại khó bấm Ctrl+F5) */
 let bootT=Date.now();
 function checkNewBuild(){try{if(!STANDALONE||!/^https?:/.test(location.protocol)||BUILD.startsWith('__'))return;
@@ -1078,12 +1078,21 @@ document.addEventListener('click',e=>{
 $('#h-quick').onclick=()=>openQuick();
 
 /* =================== ROOM (exam UI) =================== */
+/* =================== NHÁP BÀI LÀM: thoát ra mở lại vẫn đúng đề cũ và phần đã làm =================== */
+let curDK=null,roomDK=null;
+function takeDK(){const k=curDK;curDK=null;roomDK=k;return k;}
+const dkDoc=k=>'draft_'+String(k).replace(/[^\w-]/g,'_');
+async function getDraft(k){if(!k)return null;try{return await getDoc(dkDoc(k));}catch(e){return null;}}
+const _dT={};
+function putDraft(k,data,now){if(!k)return;clearTimeout(_dT[k]);const f=()=>{try{putDoc(dkDoc(k),Object.assign({t:Date.now()},data));}catch(e){}};if(now)f();else _dT[k]=setTimeout(f,800);}
+function dropDraft(k){if(!k)return;clearTimeout(_dT[k]);try{delDoc(dkDoc(k));delDoc(dkDoc(k)+'_aud');}catch(e){}if(roomDK===k)roomDK=null;}
 let roomTimer=null,roomClose=null;
 function closeRoom(){setTimeout(()=>{pendingSkill=false;try{renderToday()}catch(e){}},0);clearInterval(roomTimer);try{tts&&tts.stop()}catch(e){}try{speechSynthesis.cancel()}catch(e){}if(roomClose)roomClose();roomClose=null;$('#room').classList.add('hidden');$('#room').innerHTML='';document.body.style.overflow='';}
 function openRoom(title){
+  roomDK=null;
   const r=$('#room');r.classList.remove('hidden');document.body.style.overflow='hidden';
   r.innerHTML=`<div class="rbar"><button class="btn ghost sm" id="r-x">✕</button><div class="t">${esc(title)}</div><span class="clock hidden" id="r-clock">00:00</span><button class="btn sm hidden" id="r-submit">Nộp bài</button></div><div id="r-body" style="flex:1;display:flex;flex-direction:column;min-height:0">${spin('Đang soạn đề…')}</div>`;
-  $('#r-x').onclick=()=>confirmBox('Thoát phòng thi? Bài đang làm sẽ không được lưu.','Thoát',closeRoom);
+  $('#r-x').onclick=()=>roomDK?closeRoom():confirmBox('Thoát phòng thi? Bài đang làm sẽ không được lưu.','Thoát',closeRoom);
   return $('#r-body');
 }
 function startClock(sec,onEnd){
@@ -1099,9 +1108,10 @@ function confirmBox(msg,ok,fn){
 }
 
 /* ---- MCQ room: parts = [{title, text?, lines?, questions:[]}] ---- */
+function draftNote(body){setTimeout(()=>{const n=document.createElement('div');n.className='note';n.style.margin='0 0 8px';n.textContent='Đang làm tiếp bài nháp lần trước: đúng đề cũ và các câu bạn đã chọn.';body.prepend(n);},0);}
 function mcqRoom(body,parts,opt){
   const qs=[];parts.forEach((p,pi)=>p.questions.forEach(q=>qs.push({...q,pi})));
-  const ans=new Array(qs.length).fill(-1);let cur=0,done=false;
+  const ans=new Array(qs.length).fill(-1);if(Array.isArray(opt.initAns))opt.initAns.forEach((v,i)=>{if(i<ans.length&&v>=0)ans[i]=v;});let cur=0,done=false;
   const isListen=parts.some(p=>p.lines);
   body.innerHTML=`<div class="rtabs"><button class="on" data-p="l">${isListen?'Audio':'Bài đọc'}</button><button data-p="r">Câu hỏi</button></div>
    <div class="rmain"><div class="pane l" id="pl"></div><div class="pane r hide-m" id="pr"></div></div><div class="nav" id="pn"></div>`;
@@ -1146,7 +1156,8 @@ function mcqRoom(body,parts,opt){
   $('#pr').innerHTML=(opt.resultSlot?'<div id="rres"></div>':'')+qs.map((q,i)=>`${i===0||qs[i-1].pi!==q.pi?`<h4 style="margin:16px 0 0">${esc(parts[q.pi].qtitle||parts[q.pi].title||'')}</h4>`:''}<div class="q" id="q${i}"><div><span class="qn">${i+1}</span><span class="qt">${esc(q.q)}</span></div>${q.options.map((o,j)=>`<label class="opt"><input type="radio" name="o${i}" value="${j}"><span><b>${'ABCD'[j]}.</b> ${esc(o)}</span></label>`).join('')}<div class="exp hidden"></div></div>`).join('');
   $('#pn').innerHTML=qs.map((q,i)=>`<button data-i="${i}">${i+1}</button>`).join('');
   $('#pr').querySelectorAll('input').forEach(inp=>inp.onchange=()=>{const i=+inp.name.slice(1);ans[i]=+inp.value;
-    $('#q'+i).querySelectorAll('.opt').forEach((o,j)=>o.classList.toggle('sel',j===ans[i]));$('#pn').children[i].classList.add('done');});
+    $('#q'+i).querySelectorAll('.opt').forEach((o,j)=>o.classList.toggle('sel',j===ans[i]));$('#pn').children[i].classList.add('done');if(opt.onAns)opt.onAns(ans.slice());});
+  ans.forEach((v,i)=>{if(v<0)return;const inp=$('#pr').querySelector(`input[name="o${i}"][value="${v}"]`);if(inp){inp.checked=true;$('#q'+i).querySelectorAll('.opt').forEach((o,j)=>o.classList.toggle('sel',j===v));$('#pn').children[i].classList.add('done');}});
   $('#pn').querySelectorAll('button').forEach(b=>b.onclick=()=>{const i=+b.dataset.i;if(qs[i].pi!==cur)showPart(qs[i].pi);
     if(innerWidth<=820)tabs[1].click();$('#q'+i).scrollIntoView({behavior:'smooth',block:'start'});});
   // when scrolling questions, follow part on desktop
@@ -1226,6 +1237,8 @@ const RWORDS={A1:160,A2:260,B1:380,B2:450,C1:520};
 async function openRead(n,o){
   o=o||{};const LV=o.lv||LVL;
   await ready;const body=openRoom(n===4?'Reading – đề đầy đủ (40 câu, 60 phút)':`Reading – 1 bài (${LV})`);
+  const dk=takeDK();const dr=await getDraft(dk);
+  if(dr&&dr.g&&dr.g.parts){draftNote(body);return runGen(body,dr.g,dr.gid,dk,dr.ans);}
   try{
     if(n===1&&!o.ai){const r=await realSection('reading');if(r){state.usedSec[r.key]=Date.now();save();
       const qs=r.sec.questions.filter(q=>q.options&&q.options.length).map(q=>({...cleanQ(q),answer:q.answer==null?null:+q.answer}));
@@ -1237,7 +1250,7 @@ async function openRead(n,o){
     for(let i=0;i<n;i++){body.innerHTML=spin(`Đang soạn bài đọc ${i+1}/${n}…`);
       const lv=n===4?RLV[i]:LV;const d=await genReading(lv,n===4?[400,450,500,500][i]:RWORDS[lv],o.nq||10,n===4&&i===3?'more literary or specialised':(o.hint||''));
       parts.push({title:d.title,short:'Passage '+(i+1),text:d.text,translation_vi:d.translation_vi||'',qtitle:`Passage ${i+1}: ${d.title}`,questions:d.questions});}
-    runGen(body,{score:'VSTEP Đọc',label:n===4?'Reading đầy đủ (40 câu)':`Reading 1 bài ${LV}: ${parts[0].title}`,minutes:n===4?60:(o.min||15),parts});
+    runGen(body,{dk,score:'VSTEP Đọc',label:n===4?'Reading đầy đủ (40 câu)':`Reading 1 bài ${LV}: ${parts[0].title}`,minutes:n===4?60:(o.min||15),parts});
   }catch(e){body.innerHTML=`<div class="pane">${errMsg(e)}</div>`}
 }
 
@@ -1256,13 +1269,15 @@ Return ONLY JSON: {"title":string,"lines":[{"speaker":"A"|"B"|"N","text":string}
 }
 async function openListen(ps,lvO){
   await ready;const body=openRoom(ps.length>1?'Listening – đề đầy đủ (35 câu)':'Listening – '+LSPEC[ps[0]].t);
+  const dk=takeDK();const dr=await getDraft(dk);
+  if(dr&&dr.g&&dr.g.parts){draftNote(body);return runGen(body,dr.g,dr.gid,dk,dr.ans);}
   try{
     const parts=[];
     for(let i=0;i<ps.length;i++){body.innerHTML=spin(`Đang soạn ${LSPEC[ps[i]].t}…`);
       const d=await genListen(ps[i],ps.length>1?['B1','B2','C1'][i]:(lvO||LVL));
       parts.push({title:LSPEC[ps[i]].t,short:ps[i]==='a'?'Audio':'Part '+ps[i].slice(1),lines:d.lines,translation_vi:d.translation_vi||'',questions:d.questions});}
     if(!tts&&!('speechSynthesis' in window))parts.forEach(p=>p.audioNote='Thiết bị này không phát được giọng đọc, nên transcript sẽ hiện ngay để bạn luyện như bài đọc.');
-    runGen(body,{score:'VSTEP Nghe',label:ps.length>1?'Listening đầy đủ (35 câu)':`Listening ${LSPEC[ps[0]].t} (${lvO||LVL})`,minutes:ps.length>1?40:Math.ceil(LSPEC[ps[0]].n*1.1),parts});
+    runGen(body,{dk,score:'VSTEP Nghe',label:ps.length>1?'Listening đầy đủ (35 câu)':`Listening ${LSPEC[ps[0]].t} (${lvO||LVL})`,minutes:ps.length>1?40:Math.ceil(LSPEC[ps[0]].n*1.1),parts});
   }catch(e){body.innerHTML=`<div class="pane">${errMsg(e)}</div>`}
 }
 
@@ -1285,10 +1300,13 @@ async function saveGen(g){
 
   save();autoShare('gen',id);return id;
 }
-async function runGen(body,g,existingId){
-  const id=existingId||await saveGen(g);
-  const m=state.gens.find(x=>x.id===id);if(m){m.runs=(m.runs||0)+1;save();}
-  mcqRoom(body,clone(g.parts),{minutes:g.minutes,onDone:doneFor(g)});
+async function runGen(body,g,existingId,dk,initAns){
+  dk=dk||g.dk;const gg=Object.assign({},g);delete gg.dk;
+  const id=existingId||await saveGen(gg);
+  const m=state.gens.find(x=>x.id===id);if(m&&!initAns){m.runs=(m.runs||0)+1;save();}
+  if(dk)putDraft(dk,{g:gg,gid:id,ans:initAns||[]},true);
+  const done=doneFor(gg);
+  mcqRoom(body,clone(gg.parts),{minutes:gg.minutes,initAns,onAns:dk?a=>putDraft(dk,{g:gg,gid:id,ans:a}):null,onDone:(c,t)=>{dropDraft(dk);return done(c,t);}});
 }
 async function openGen(id){
   const m=state.gens.find(x=>x.id===id);const body=openRoom((m&&m.label)||'Đề đã lưu');
@@ -1327,7 +1345,8 @@ function gradeHTML(d,max,extra){
 const WMETA={pt:{min:20,words:100,name:'Test đầu vào – Viết'},a:{min:15,words:40,name:'Viết A1–A2'},v1:{min:20,words:120,name:'VSTEP Viết Task 1'},v2:{min:40,words:250,name:'VSTEP Viết Task 2'},t67:{min:10,words:0,name:'TOEIC Viết Q6–7'},t8:{min:30,words:300,name:'TOEIC Viết Q8'}};
 async function openWrite(card,givenPrompt){
   await ready;const task=card.task,M=WMETA[task];const body=openRoom(`${M.name}: ${card.title||''}`);
-  let prompt=givenPrompt;
+  const dk=givenPrompt?null:takeDK();const dr=await getDraft(dk);
+  let prompt=givenPrompt||(dr&&dr.prompt)||null;
   try{
     if(!prompt){const spec={a:`A short writing task for ${aLv()} learners (Vietnamese university student): a message, email or postcard to a friend, or a short paragraph about daily life, family, hobbies, home or a recent weekend. Give the situation and 3 bullet points to include, using simple words. End with "Write 40–80 words."`,v1:`VSTEP Writing Task 1: ${card.kind}. Give the situation (and the incoming letter if relevant) and 3 points to cover. End with "Write a letter of at least 120 words."`,
       v2:`VSTEP Writing Task 2: ${card.kind} on a social/education/technology/environment topic. End with "Write an essay of at least 250 words. Use reasons and relevant examples from your own knowledge or experience."`,
@@ -1343,7 +1362,8 @@ async function openWrite(card,givenPrompt){
     <div class="row" style="justify-content:space-between;margin-top:8px"><span class="wc" id="w-wc">0 từ${M.words?' / tối thiểu '+M.words:''}</span><button class="btn" id="w-go">Nộp và chấm</button></div><div id="w-res"></div></div></div>`;
   const tabs=body.querySelectorAll('.rtabs button');tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));$('#pl').classList.toggle('hide-m',b.dataset.p!=='l');$('#pr').classList.toggle('hide-m',b.dataset.p!=='r');});
   const ta=$('#w-ans');ta.oninput=()=>{const n=wc(ta.value);$('#w-wc').textContent=n+' từ'+(M.words?' / tối thiểu '+M.words:'');$('#w-wc').style.color=M.words&&n<M.words?'var(--accent)':'';};
-  const draftKey='vstep-draft';
+  if(dk){putDraft(dk,{prompt,answer:(dr&&dr.answer)||''},true);if(dr&&dr.answer){ta.value=dr.answer;ta.oninput();body.insertAdjacentHTML('afterbegin','<div class="note" style="margin:0 0 8px">Đang làm tiếp bài nháp lần trước: đúng đề cũ và phần bạn đã viết.</div>');}
+    const oi=ta.oninput;ta.oninput=()=>{oi();putDraft(dk,{prompt,answer:ta.value});};}
   const go=async()=>{
     const ans=ta.value.trim();if(wc(ans)<20){$('#w-res').innerHTML='<p class="mute">Bài quá ngắn để chấm.</p>';return}
     stopClock();$('#w-go').disabled=true;ta.readOnly=true;$('#w-res').innerHTML=spin('Đang chấm bài… (khoảng 20–40 giây)');
@@ -1361,7 +1381,7 @@ Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên ti�
         else{state.last['VSTEP Viết']=s;extra+=`<p class="mute">Điểm Viết = Task 1 × 1/3 + Task 2 × 2/3. Làm thêm ${task==='v1'?'Task 2':'Task 1'} để có điểm Viết tổng.</p>`;}
         addHist(M.name,s,`${M.name}: ${card.title||''}`);}
       else addHist(M.name,String(d.overall),M.name);
-      const attP=saveAttempt('write',`${M.name}${card.title?': '+card.title:''}`,vstep||basic?d.overall+'/10':String(d.overall),{prompt,answer:ans,grade:d,extra,max:vstep||basic?'/10':''});
+      dropDraft(dk);const attP=saveAttempt('write',`${M.name}${card.title?': '+card.title:''}`,vstep||basic?d.overall+'/10':String(d.overall),{prompt,answer:ans,grade:d,extra,max:vstep||basic?'/10':''});
       $('#w-res').innerHTML=`<div class="result" style="margin-top:12px">${gradeHTML(d,vstep||basic?'/10':'',extra)}<div class="row"><button class="btn ghost sm" id="w-model">Xem bài mẫu</button><button class="btn sm" onclick="closeRoom()">Xong</button></div><div id="w-mout"></div></div>`;
       $('#w-res').scrollIntoView({behavior:'smooth'});
       $('#w-model').onclick=async()=>{const b=$('#w-model');b.disabled=true;$('#w-mout').innerHTML=spin('Đang viết bài mẫu…');
@@ -1609,11 +1629,11 @@ async function recWav(){let rate=16000,pcm=await clipsPCM(rate);if(!pcm)return n
   return {blob:wavBlob(pcm,rate),sec:Math.round(pcm.length/rate)};}
 const blobB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(b);});
 let txDone=0,txBusy=false,noAutoTx=false;
-async function showRec(){const box=$('#s-rec');if(!box||!mclips.length)return;try{const w=await recWav();if(!w)return;
+async function showRec(){const box=$('#s-rec');if(!box||!mclips.length)return;if(roomDK){const k=roomDK;clipsB64().then(cl=>{if(roomDK===k)putDoc(dkDoc(k)+'_aud',{clips:cl}).catch(()=>{});});}try{const w=await recWav();if(!w)return;
   box.innerHTML=`<p class="mute" style="margin:8px 0 4px">Ghi âm bài nói của bạn (${w.sec} giây${mclips.length>1?', '+mclips.length+' đoạn':''}). Khi chấm, AI sẽ nghe bản này để nhận xét phát âm:</p><audio controls src="${URL.createObjectURL(w.blob)}" style="width:100%"></audio><div class="row" style="margin-top:4px">${STANDALONE&&typeof apiOn==='function'&&apiOn()?'<button class="btn sm ghost" id="s-rec-tx">✨ Chép lại chữ chính xác bằng AI</button>':''}<button class="btn sm ghost" id="s-rec-clr">Xoá ghi âm, nói lại từ đầu</button></div><div id="s-tx"></div>`;
   const txb=$('#s-rec-tx');if(txb)txb.onclick=()=>aiTranscribe(w,true);
   if(txb&&!noAutoTx&&w.sec>=3&&txDone<mclips.length)aiTranscribe(w,false);
-  $('#s-rec-clr').onclick=()=>{mclips=[];txDone=0;box.innerHTML='';const t=$('#s-ans');if(t){t.value='';t.dispatchEvent(new Event('input'));}};}catch(e){}}
+  $('#s-rec-clr').onclick=()=>{mclips=[];txDone=0;if(roomDK)delDoc(dkDoc(roomDK)+'_aud').catch(()=>{});box.innerHTML='';const t=$('#s-ans');if(t){t.value='';t.dispatchEvent(new Event('input'));}};}catch(e){}}
 /* chữ nhận bằng trình duyệt hay sai với giọng Việt: gửi ghi âm cho Gemini chép lại đúng từng từ */
 async function aiTranscribe(w,manual){
   const st=$('#s-tx'),ta=$('#s-ans');if(!st||!ta||txBusy)return;txBusy=true;const n=mclips.length;
@@ -1664,7 +1684,8 @@ function speakExtraHTML(d){
 }
 
 async function openSpeak(card,givenPrompt){
-  await ready;const body=openRoom(card.part==='pt'?'Test đầu vào – Nói':card.part==='a'?`Nói A1–A2: ${card.title}`:`VSTEP Speaking ${card.lab}: ${card.title}`);let prompt=givenPrompt;
+  await ready;const body=openRoom(card.part==='pt'?'Test đầu vào – Nói':card.part==='a'?`Nói A1–A2: ${card.title}`:`VSTEP Speaking ${card.lab}: ${card.title}`);
+  mclips=[];const dk=givenPrompt?null:takeDK();const dr=await getDraft(dk);let prompt=givenPrompt||(dr&&dr.prompt)||null;
   try{
     if(!prompt){const spec={a:`A1–A2 speaking practice: 5 simple personal questions on one or two familiar topics (family, home, daily routine, hobbies, food, weekend), each on its own line, using ${aLv()} vocabulary.`,v1:'VSTEP Speaking Part 1 (Social interaction): two everyday topics, each with 3 short questions.',
       v2:'VSTEP Speaking Part 2 (Solution discussion): a situation and 3 options; the candidate chooses the best and explains why it is better than the others.',
@@ -1682,9 +1703,13 @@ async function openSpeak(card,givenPrompt){
     <textarea id="s-ans" style="min-height:220px" placeholder="Lời nói của bạn hiện ở đây…"></textarea>
     <div class="row" style="justify-content:space-between;margin-top:8px"><span class="wc" id="s-wc">0 từ</span><button class="btn" id="s-go">Nộp và chấm</button></div><div id="s-res"></div></div></div>`;
   const tabs=body.querySelectorAll('.rtabs button');tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.toggle('on',x===b));$('#pl').classList.toggle('hide-m',b.dataset.p!=='l');$('#pr').classList.toggle('hide-m',b.dataset.p!=='r');});
-  const ta=$('#s-ans');ta.oninput=()=>$('#s-wc').textContent=wc(ta.value)+' từ';
+  const ta=$('#s-ans');ta.oninput=()=>{$('#s-wc').textContent=wc(ta.value)+' từ';if(dk)putDraft(dk,{prompt,answer:ta.value});};
+  if(dk){putDraft(dk,{prompt,answer:(dr&&dr.answer)||''},true);
+    if(dr&&dr.answer){ta.value=dr.answer;$('#s-wc').textContent=wc(ta.value)+' từ';}
+    getDoc(dkDoc(dk)+'_aud').then(a=>{if(a&&a.clips&&a.clips.length&&!mclips.length){mclips=a.clips.map(c=>b64Blob(c.data,c.mime));txDone=mclips.length;showRec();}}).catch(()=>{});
+    if(dr&&dr.answer)body.insertAdjacentHTML('afterbegin','<div class="note" style="margin:0 0 8px">Đang làm tiếp bài nháp lần trước: đúng đề cũ, phần đã nói và ghi âm vẫn còn. Bấm 🎙 để nói tiếp hoặc chấm luôn.</div>');}
   if($('#s-prep'))$('#s-prep').onclick=()=>startClock(card.prep,()=>{$('#s-mic').click();});
-  let userStop=false,resumes=0,clockOn=false;mclips=[];txDone=0;noAutoTx=false;
+  let userStop=false,resumes=0,clockOn=false;txDone=0;noAutoTx=false;
   const stopMic=()=>{userStop=true;clockOn=false;if(dict)Promise.resolve(dict.stop()).catch(()=>{});recStop();$('#s-mic').textContent='🎙 Nói tiếp';};
   roomClose=()=>{if(listening)stopMic();recStop(true);};
   let finals='',bound=false;
@@ -1754,7 +1779,7 @@ All comments and explanations in Vietnamese. overall is a single number${vstep||
       if(basic){d.overall=round05(+d.overall);addHist(card.part==='pt'?'Test đầu vào':'Nói A1–A2',d.overall,card.part==='pt'?'Test đầu vào: Nói':'Nói A1–A2: '+card.title);if(card.onResult)card.onResult(d);}
       else if(vstep){d.overall=round05(+d.overall);state.last['VSTEP Nói']=d.overall;addHist('VSTEP Nói '+card.lab,d.overall,`Speaking ${card.lab}: ${card.title}`);}
       else addHist('TOEIC Nói Q11',String(d.overall),'TOEIC Speaking Q11');
-      clipsB64().then(cl=>saveAttempt('speak',`${card.lab||'Nói'}${card.title?': '+card.title:''}`,vstep||basic?d.overall+'/10':String(d.overall),{prompt,answer:ta.value,grade:d,extra:calNote,max:vstep||basic?'/10':'',audioSec:audio&&audio.sec||0},cl));
+      dropDraft(dk);clipsB64().then(cl=>saveAttempt('speak',`${card.lab||'Nói'}${card.title?': '+card.title:''}`,vstep||basic?d.overall+'/10':String(d.overall),{prompt,answer:ta.value,grade:d,extra:calNote,max:vstep||basic?'/10':'',audioSec:audio&&audio.sec||0},cl));
       $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${aNote}${gradeHTML(d,vstep||basic?'/10':'',calNote+(audio&&d.pron?'<p class="mute">AI đã nghe ghi âm của bạn để chấm phát âm.</p>':''))}${speakExtraHTML(d)}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
       $('#s-res').querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>sayEn(b.dataset.say,b.dataset.say.length>40?0.95:0.8));
       $('#s-res').scrollIntoView({behavior:'smooth'});
@@ -2964,6 +2989,7 @@ function actLabel(act){
   return c?`${({listen:'Listening',write:'Writing',read:'Reading',speak:'Speaking'})[k]} ${c.lab}: ${c.title}`:act;
 }
 function runAct(k,id){
+  if(!curDK&&['speak','write','listen','read'].includes(k))curDK='act:'+k+':'+id;
   if(k==='speak')openSpeak(CAT.speak.find(x=>x.id===id));
   if(k==='write')openWrite(CAT.write.find(x=>x.id===id));
   if(k==='listen')openListen([CAT.listen.find(x=>x.id===id).part]);
@@ -3377,7 +3403,7 @@ async function planAct(k,d,prev,practice){
     $('#pw-pr').onclick=()=>planAct(k,d,prev,true);return;
   }
   if(x.type==='grammar')return openGram(x.id);
-  if(x.type==='skill'){const [a,b]=x.act.split(':');pendingSkill=k;runAct(a,b);return;}
+  if(x.type==='skill'){const [a,b]=x.act.split(':');pendingSkill=k;curDK='plan:'+(Object.keys(P().daily.days).find(z=>P().daily.days[z]===d)||todayKey())+':'+k;runAct(a,b);return;}
   if(x.type==='tip'){d.done[k]=true;save();renderToday();}
 }
 function bindTest(w){w.querySelectorAll('[data-pt]').forEach(b=>b.onclick=()=>runPT(b.dataset.pt));}
