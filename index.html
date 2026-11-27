@@ -520,6 +520,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
     <p class="lead">Điểm mới nhất của từng kỹ năng được điền sẵn để quy đổi ra bậc VSTEP.</p>
   </div></div>
   <div class="wrap">
+    <div class="sec" id="att-sec"><h2>Bài làm của tôi</h2><p>Mọi bài Viết, Nói, Đọc, Nghe bạn đã làm: đề bài, bài làm của bạn và phần chữa, lưu lâu dài để xem lại.</p><div class="panel" id="att-body"></div></div>
     <div class="sec" id="focus-sec"><h2>Ôn đúng trọng tâm</h2><p>Web ghi lại dạng câu bạn hay sai khi làm Đọc, Nghe, Ngữ pháp và lỗi trong bài Viết, Nói. Ôn chỗ yếu nhất trước.</p><div id="focus-body"></div></div>
     <div class="panel">
       <h2>Quy đổi điểm</h2>
@@ -584,7 +585,7 @@ details.tpl>summary small{font-weight:500;color:var(--mute)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const STANDALONE=true;
-const BUILD='1795620187';
+const BUILD='1795783283';
 /* bản web: có bản mới thì tự tải lại (điện thoại khó bấm Ctrl+F5) */
 let bootT=Date.now();
 function checkNewBuild(){try{if(!STANDALONE||!/^https?:/.test(location.protocol)||BUILD.startsWith('__'))return;
@@ -889,7 +890,7 @@ async function getDoc(k){
 }
 async function delDoc(k){delete docCache[k];try{state._del=state._del||{};state._del[k]=Date.now();const ks=Object.keys(state._del);if(ks.length>600)ks.sort((a,b)=>state._del[a]-state._del[b]).slice(0,ks.length-600).forEach(x=>delete state._del[x]);}catch(e){}try{localStorage.removeItem('vstep-doc-'+k)}catch(e){}if(db&&uid){try{await db.doc(`data/users/${uid}/${k}`).delete()}catch(e){}}}
 function addHist(skill,score,label){
-  state.hist.unshift({t:Date.now(),skill,score,label});state.hist=state.hist.slice(0,300);
+  state.hist.unshift({t:Date.now(),skill,score,label});state.hist=state.hist.slice(0,5000);
   if(typeof score==='number'&&skill.startsWith('VSTEP'))state.last[skill]=score;
   if(pendingSkill){const p=dl().days[todayKey()];if(p&&p.done)p.done[pendingSkill===true?'skill':pendingSkill]=true;pendingSkill=false;}
   save();
@@ -1162,6 +1163,7 @@ function mcqRoom(body,parts,opt){
     });
     try{qs.forEach((q,i)=>{if(q.answer!=null&&q.answer>=0&&!q.ai_answer)logQ(isListen?'listening':'reading',QTYPE_VI[q.qtype]?q.qtype:guessQtype(q.q),ans[i]===q.answer);});save();}catch(e){}
     showPart(cur);
+    try{if(!opt.noSave)saveAttempt(isListen?'listen':'read',opt.attTitle||parts.map(p=>p.title).filter(Boolean).join(' · ')||($('#room .rbar .t')&&$('#room .rbar .t').textContent)||(isListen?'Bài nghe':'Bài đọc'),`${c}/${n||1}`,{parts:partsForSave(parts),ans:ans.slice()});}catch(e){}
     const res=opt.onDone(c,n||1);
     $('#pr').insertAdjacentHTML('afterbegin',`<div class="result">${res}</div>`);$('#pr').scrollTop=0;if(innerWidth<=820)tabs[1].click();
   };
@@ -1280,7 +1282,7 @@ async function saveGen(g){
   const id='g'+Date.now().toString(36);const n=g.parts.reduce((a,p)=>a+p.questions.length,0);
   await putDoc('gen_'+id,clone(g));
   state.gens.unshift({id,label:g.label,score:g.score,n,t:Date.now(),runs:0});
-  while(state.gens.length>80){const old=state.gens.pop();delDoc('gen_'+old.id);}
+
   save();autoShare('gen',id);return id;
 }
 async function runGen(body,g,existingId){
@@ -1359,10 +1361,12 @@ Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên ti�
         else{state.last['VSTEP Viết']=s;extra+=`<p class="mute">Điểm Viết = Task 1 × 1/3 + Task 2 × 2/3. Làm thêm ${task==='v1'?'Task 2':'Task 1'} để có điểm Viết tổng.</p>`;}
         addHist(M.name,s,`${M.name}: ${card.title||''}`);}
       else addHist(M.name,String(d.overall),M.name);
+      const attP=saveAttempt('write',`${M.name}${card.title?': '+card.title:''}`,vstep||basic?d.overall+'/10':String(d.overall),{prompt,answer:ans,grade:d,extra,max:vstep||basic?'/10':''});
       $('#w-res').innerHTML=`<div class="result" style="margin-top:12px">${gradeHTML(d,vstep||basic?'/10':'',extra)}<div class="row"><button class="btn ghost sm" id="w-model">Xem bài mẫu</button><button class="btn sm" onclick="closeRoom()">Xong</button></div><div id="w-mout"></div></div>`;
       $('#w-res').scrollIntoView({behavior:'smooth'});
       $('#w-model').onclick=async()=>{const b=$('#w-model');b.disabled=true;$('#w-mout').innerHTML=spin('Đang viết bài mẫu…');
         try{const m=await ask(`Write a natural model answer around CEFR ${basic?aLv():'B2'} for this ${M.name} prompt so a learner can imitate the structure, then 6 useful phrases from it with Vietnamese meaning.\nPrompt: """${prompt}"""\nReturn ONLY JSON: {"model":string,"phrases":[{"en":string,"vi":string}]}`);
+          attP.then(id=>updAttempt(id,{model:m}));
           $('#w-mout').innerHTML=`<h4>Bài mẫu</h4><div class="ptext">${esc(m.model)}</div><h4>Cụm từ nên học</h4><ul>${(m.phrases||[]).map(p=>`<li><b>${esc(p.en)}</b>: ${esc(p.vi)}</li>`).join('')}</ul>`;}
         catch(e){$('#w-mout').innerHTML=errMsg(e);b.disabled=false}};
     }catch(e){$('#w-res').innerHTML=`<p class="mute">${errMsg(e)}</p>`;$('#w-go').disabled=false;ta.readOnly=false;}
@@ -1374,6 +1378,56 @@ Do NOT rewrite the whole text. Return ONLY JSON: {"criteria":[{"name":"Tên ti�
 
 const W_VSTEP=task=>`You are a strict, calibrated VSTEP.3-5 writing examiner (Vietnam MOET format). Score ${task==='v1'?'Task 1 (letter, min 120 words)':'Task 2 (essay, min 250 words)'} on the 4 VSTEP criteria, each 0-10 in 0.5 steps: 1) Task fulfillment (all required points, register, adequate length — penalise under-length), 2) Organization (paragraphing, coherence, cohesion), 3) Vocabulary (range, accuracy, collocation, spelling), 4) Grammar (range, accuracy, punctuation). overall = mean rounded to 0.5. level: "Bậc 3 (B1)" 4.0-5.5, "Bậc 4 (B2)" 6.0-8.0, "Bậc 5 (C1)" 8.5+, else "Dưới bậc 3". A typical B1 text scores 4-5.5, B2 6-8; memorised templates are penalised.`;
 const S_VSTEP=part=>`You are a calibrated VSTEP.3-5 speaking examiner. Rate this Part ${String(part).slice(1)} response on the 5 VSTEP speaking criteria, each 0-10 (0.5 steps): Grammar (Ngữ pháp), Vocabulary (Từ vựng), Pronunciation (Phát âm), Fluency (Độ trôi chảy), Discourse management (Tổ chức ý). overall = mean rounded to 0.5; level per VSTEP bands.`;
+
+/* =================== BÀI LÀM CỦA TÔI: lưu đề, bài làm và phần chữa để xem lại (không tự xoá) =================== */
+const ATT_KIND={write:'Viết',speak:'Nói',read:'Đọc',listen:'Nghe'};
+function attList(){const p=P();if(!Array.isArray(p.atts))p.atts=[];return p.atts;}
+const attId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+async function saveAttempt(kind,title,score,data,audio){
+  const id=attId();
+  try{await putDoc('att_'+id,Object.assign({kind,title,score,t:Date.now()},data));}catch(e){}
+  if(audio&&audio.length){try{await putDoc('attaud_'+id,{clips:audio});}catch(e){}}
+  attList().unshift({id,kind,title:String(title||'').slice(0,140),score:score==null?'':String(score),t:Date.now(),day:todayKey(),aud:!!(audio&&audio.length)});save();
+  try{renderAtts();}catch(e){}return id;
+}
+async function updAttempt(id,patch){try{const d=await getDoc('att_'+id);if(d)await putDoc('att_'+id,Object.assign(d,patch));}catch(e){}}
+async function clipsB64(){const out=[];for(const b of mclips.slice(0,8)){if(b.size>4e6)continue;try{out.push({mime:b.type||'audio/webm',data:await blobB64(b)});}catch(e){}}return out;}
+const b64Blob=(b,m)=>{const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return new Blob([u],{type:m});};
+function partsForSave(parts){return JSON.parse(JSON.stringify(parts.map(p=>{const o={};for(const k in p)if(!k.startsWith('_')&&k!=='audioUrl')o[k]=p[k];return o;})));}
+function mcqReview(parts,ans){let k=0;
+  return parts.map(p=>{const head=p.lines?`<h4>${esc(p.title||'Bài nghe')}</h4><div class="ptext">${esc(p.lines.map(l=>(l.speaker&&l.speaker!=='N'?l.speaker+': ':'')+l.text).join('\n\n'))}</div>`
+      :`${p.instr?`<div class="instr">${esc(p.instr)}</div>`:''}<h4>${esc(p.title||'Bài đọc')}</h4><div class="ptext">${esc(p.text||'')}</div>`;
+    const tr=p.translation_vi?`<details style="margin:8px 0"><summary class="mute" style="cursor:pointer">Xem bản dịch tiếng Việt</summary><div class="ptext tr">${esc(p.translation_vi)}</div></details>`:'';
+    const qh=(p.questions||[]).map(q=>{const i=k++,a=ans[i],has=q.answer!=null&&q.answer>=0;
+      return `<div class="q"><div><span class="qn">${i+1}</span><span>${esc(q.q)}</span></div>${(q.options||[]).map((o,j)=>`<div class="opt ${has&&j===q.answer?'ok':''} ${a===j&&(!has||j!==q.answer)?'bad':''}">${esc(o)}${a===j?' <b>← bạn chọn</b>':''}${Array.isArray(q.why_vi)&&q.why_vi[j]?`<div class="why">${esc(String(q.why_vi[j]).replace(/^[A-D][:.)]\s*/,''))}</div>`:''}</div>`).join('')}
+        ${a==null||a<0?'<p class="mute">Bạn bỏ trống câu này.</p>':''}${q.explain_vi?`<div class="exp">${esc(q.explain_vi)}</div>`:''}</div>`;}).join('');
+    return head+tr+`<h4 style="margin-top:14px">Câu hỏi</h4>`+qh;}).join('<hr style="margin:20px 0">');
+}
+async function openAttempt(id){
+  const m=attList().find(x=>x.id===id);const body=openRoom('Xem lại: '+(m?m.title:'bài làm'));body.innerHTML=spin('Đang mở bài làm…');
+  try{const d=await getDoc('att_'+id);if(!d)throw{message:'Không tìm thấy bài làm này.'};
+    const when=new Date(d.t).toLocaleString('vi-VN',{dateStyle:'short',timeStyle:'short'});
+    let h=`<div style="max-width:860px;margin:0 auto;padding:4px 4px 40px"><p class="mute">${ATT_KIND[d.kind]||''} · ${esc(when)}${d.score!==''&&d.score!=null?' · Kết quả: <b>'+esc(String(d.score))+'</b>':''}</p>`;
+    if(d.kind==='read'||d.kind==='listen'){h+=mcqReview(d.parts||[],d.ans||[]);}
+    else{h+=`<h4>Đề bài</h4><div class="ptext">${esc(d.prompt||'')}</div>`;
+      if(m&&m.aud)h+=`<h4>Ghi âm bài nói của bạn</h4><div id="att-aud">${spin('Đang tải ghi âm…')}</div>`;
+      h+=`<h4>Bài làm của bạn</h4><div class="ptext" style="white-space:pre-wrap">${esc(d.answer||'')}</div>`;
+      if(d.grade)h+=`<h4>Phần chữa</h4><div class="result">${gradeHTML(d.grade,d.max||'',d.extra||'')}${d.kind==='speak'?speakExtraHTML(d.grade):''}</div>`;
+      if(d.model)h+=`<h4>Bài mẫu</h4><div class="ptext">${esc(d.model.model||'')}</div>${(d.model.phrases||[]).length?`<h4>Cụm từ nên học</h4><ul>${d.model.phrases.map(p=>`<li><b>${esc(p.en)}</b>: ${esc(p.vi)}</li>`).join('')}</ul>`:''}`;}
+    h+=`<div class="row" style="margin-top:16px"><button class="btn sm" onclick="closeRoom()">Đóng</button></div></div>`;
+    body.innerHTML=h;body.querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>sayEn(b.dataset.say,b.dataset.say.length>40?0.95:0.8));
+    if(m&&m.aud){const a=await getDoc('attaud_'+id).catch(()=>null);const box=$('#att-aud');if(box)box.innerHTML=a&&a.clips&&a.clips.length?a.clips.map(c=>`<audio controls src="${URL.createObjectURL(b64Blob(c.data,c.mime))}" style="width:100%;margin:4px 0"></audio>`).join(''):'<p class="mute">Không có ghi âm.</p>';}
+  }catch(e){body.innerHTML=`<p class="mute">${errMsg(e)}</p>`;}
+}
+let attFilter='';
+function renderAtts(){
+  const box=$('#att-body');if(!box)return;const all=attList(),list=all.filter(a=>!attFilter||a.kind===attFilter);
+  box.innerHTML=`<div class="row" style="margin-bottom:8px">${[['','Tất cả'],['write','Viết'],['speak','Nói'],['read','Đọc'],['listen','Nghe']].map(([k,l])=>`<button class="btn sm ${attFilter===k?'':'ghost'}" data-af="${k}">${l} (${k?all.filter(a=>a.kind===k).length:all.length})</button>`).join('')}</div>
+    ${list.length?list.slice(0,200).map(a=>`<div class="grow" style="padding:8px 0;border-top:1px solid var(--line)"><div><b>${esc(a.title)}</b><div class="mute" style="font-size:13px">${ATT_KIND[a.kind]||''} · ${new Date(a.t).toLocaleString('vi-VN',{dateStyle:'short',timeStyle:'short'})}${a.score?' · '+esc(a.score):''}${a.aud?' · có ghi âm':''}</div></div><div class="row"><button class="btn sm ghost" data-ao="${a.id}">Xem lại</button></div></div>`).join('')+(list.length>200?`<p class="mute">Đang hiện 200 bài gần nhất trên ${list.length} bài.</p>`:'')
+      :'<p class="mute">Chưa có bài làm nào. Làm bài Viết, Nói, Đọc, Nghe là bài làm và phần chữa sẽ được lưu ở đây.</p>'}`;
+  box.querySelectorAll('[data-af]').forEach(b=>b.onclick=()=>{attFilter=b.dataset.af;renderAtts();});
+  box.querySelectorAll('[data-ao]').forEach(b=>b.onclick=()=>openAttempt(b.dataset.ao));
+}
 
 /* =================== ÔN ĐÚNG TRỌNG TÂM: ghi lại lỗi hay sai =================== */
 function mist(){const p=state.profiles&&P();if(!p)return{q:{},e:{},ex:[],g:{}};p.mist=p.mist||{};['q','e','g'].forEach(k=>p.mist[k]=p.mist[k]||{});p.mist.ex=p.mist.ex||[];return p.mist;}
@@ -1390,7 +1444,7 @@ function focusData(){
   return{m,q,e,g};
 }
 function gramTitle(id){for(const lv in GRAM)for(const it of GRAM[lv])if(it[0]===id)return[lv,it[1]];return['',id];}
-function renderFocus(){
+function renderFocus(){try{renderAtts();}catch(e){}
   const box=$('#focus-body');if(!box||!state.profiles)return;const{m,q,e,g}=focusData();
   if(!q.length&&!e.length&&!g.length){box.innerHTML='<div class="panel"><p class="mute" style="margin:0">Chưa đủ dữ liệu. Làm vài bài Đọc, Nghe, Ngữ pháp hoặc chấm bài Viết, Nói; web sẽ tự tìm ra chỗ bạn hay sai.</p></div>';return;}
   const bar=a=>`<span class="fbar"><i style="width:${Math.round(a*100)}%;background:${a<.6?'var(--red)':a<.8?'var(--warn)':'var(--ok)'}"></i></span>`;
@@ -1700,6 +1754,7 @@ All comments and explanations in Vietnamese. overall is a single number${vstep||
       if(basic){d.overall=round05(+d.overall);addHist(card.part==='pt'?'Test đầu vào':'Nói A1–A2',d.overall,card.part==='pt'?'Test đầu vào: Nói':'Nói A1–A2: '+card.title);if(card.onResult)card.onResult(d);}
       else if(vstep){d.overall=round05(+d.overall);state.last['VSTEP Nói']=d.overall;addHist('VSTEP Nói '+card.lab,d.overall,`Speaking ${card.lab}: ${card.title}`);}
       else addHist('TOEIC Nói Q11',String(d.overall),'TOEIC Speaking Q11');
+      clipsB64().then(cl=>saveAttempt('speak',`${card.lab||'Nói'}${card.title?': '+card.title:''}`,vstep||basic?d.overall+'/10':String(d.overall),{prompt,answer:ta.value,grade:d,extra:calNote,max:vstep||basic?'/10':'',audioSec:audio&&audio.sec||0},cl));
       $('#s-res').innerHTML=`<div class="result" style="margin-top:12px">${aNote}${gradeHTML(d,vstep||basic?'/10':'',calNote+(audio&&d.pron?'<p class="mute">AI đã nghe ghi âm của bạn để chấm phát âm.</p>':''))}${speakExtraHTML(d)}<div class="row"><button class="btn sm" onclick="closeRoom()">Xong</button></div></div>`;
       $('#s-res').querySelectorAll('[data-say]').forEach(b=>b.onclick=()=>sayEn(b.dataset.say,b.dataset.say.length>40?0.95:0.8));
       $('#s-res').scrollIntoView({behavior:'smooth'});
@@ -3297,7 +3352,9 @@ function renderPastPlan(){
   box.innerHTML=`<div class="panel" style="padding:10px 18px;margin-top:14px"><h3 style="margin:6px 0">Bài đã học (${list.length} ngày)</h3><p class="mute" style="margin:0 0 6px;font-size:13px">Bấm vào từng ngày để xem lại từ vựng, bài ngữ pháp, bài luyện.</p>
     ${list.map(([pd,[k,x]])=>{const n=x.tasks.length,dn=x.tasks.filter((_,i)=>x.done['t'+i]).length;
       return `<details style="border-top:1px solid var(--line);padding:6px 0"><summary style="cursor:pointer"><b>Ngày ${+pd+1}: ${esc(x.title||(pl.days[pd]&&pl.days[pd].title_vi)||'')}</b> <span class="mute">· ${k.split('-').reverse().slice(0,2).join('/')} · đã làm ${dn}/${n}${x.rvScore?' · kiểm tra bài cũ '+esc(x.rvScore):''}</span></summary>
+        ${(()=>{const at=attList().filter(a=>a.day===k);return at.length?`<div class="mute" style="margin:4px 0">Bài làm hôm đó: ${at.map(a=>`<a href="#" data-ao="${a.id}">${esc(ATT_KIND[a.kind]||'')}: ${esc(a.title)}${a.score?' ('+esc(a.score)+')':''}</a>`).join(' · ')}</div>`:'';})()}
         ${x.tasks.map((y,i)=>`<div class="grow" style="padding:6px 0"><span class="bub ${x.done['t'+i]?'on':''}">${i+1}</span><div><b>${esc(y.type==='tip'?'Hướng dẫn tự luyện':taskLabel(y))}</b>${y.type==='tip'?`<div class="mute">${esc(y.text_vi||'')}</div>`:''}</div>${y.type==='tip'?'':`<div class="row"><button class="btn sm ghost" data-pk="${k}" data-pi="${i}">Xem lại</button></div>`}</div>`).join('')}</details>`;}).join('')}</div>`;
+  box.querySelectorAll('[data-ao]').forEach(a=>a.onclick=e=>{e.preventDefault();openAttempt(a.dataset.ao);});
   box.querySelectorAll('[data-pk]').forEach(b=>b.onclick=()=>{const x=D.days[b.dataset.pk];if(x)planAct('t'+b.dataset.pi,x,null,false);});
 }
 function D_reset(d){const D=P().daily;delete D.days[todayKey()];P().plan.lastKey=null;save();}
